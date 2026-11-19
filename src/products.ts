@@ -10,6 +10,7 @@ export interface Product {
   originalPrice?: number;
   offerPrice?: number;
   featured?: boolean;
+  published?: boolean;
 }
 
 export const products: Product[] = [

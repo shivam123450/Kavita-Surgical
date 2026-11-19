@@ -230,6 +230,7 @@ h1, h2 { font-family: "Manrope", sans-serif; color: var(--navy); letter-spacing:
 .featured-mark { color: #c79d62; }
 .product-content > p { min-height: 35px; margin: 8px 0 15px; color: #829096; font-size: 10px; line-height: 1.7; }
 .product-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; padding-top: 12px; border-top: 1px solid #edf0ef; }
+.product-meta { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
 .product-pricing { min-height: 44px; display: flex; flex-wrap: wrap; align-items: center; align-content: center; justify-content: flex-start; column-gap: 7px; row-gap: 2px; }
 .price-details { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 18px; }
 .mrp-label { color: #849397; font-size: 8px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
@@ -238,7 +239,7 @@ h1, h2 { font-family: "Manrope", sans-serif; color: var(--navy); letter-spacing:
 .offer-price { color: #244e4a; font: 800 19px/1.2 "Manrope", sans-serif; letter-spacing: -.035em; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sample-pricing-label { flex-basis: 100%; color: #987b50; font-size: 8px; line-height: 1.3; letter-spacing: .04em; }
 .price-on-enquiry { color: #36534f; font: 700 12px/1.4 "Manrope", sans-serif; }
-.product-enquire.button { width: auto; min-height: 40px; justify-content: center; padding-inline: 11px; font-size: 10px; white-space: nowrap; }
+.product-enquire.button { width: 100%; min-width: 0; min-height: 44px; justify-content: center; padding-inline: 10px; font-size: 15px; white-space: nowrap; }
 .product-enquire.button svg { transition: transform .2s ease; }
 .product-enquire.button:hover svg { transform: translateX(3px); }
 .product-enquire:hover { color: var(--navy); }
@@ -300,12 +301,15 @@ h1, h2 { font-family: "Manrope", sans-serif; color: var(--navy); letter-spacing:
 
 .product-card-actions {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  width: 118px;
-  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
 }
 .quote-toggle {
   min-height: 34px;
+  width: 100%;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -317,6 +321,7 @@ h1, h2 { font-family: "Manrope", sans-serif; color: var(--navy); letter-spacing:
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
 }
 .quote-toggle[aria-pressed="true"] {
   color: #0c756a;
@@ -744,7 +749,7 @@ h1, h2 { font-family: "Manrope", sans-serif; color: var(--navy); letter-spacing:
     min-width: 38px;
   }
   .product-card-actions {
-    width: 112px;
+    width: 100%;
   }
   .quote-toggle {
     min-height: 36px;
@@ -815,8 +820,8 @@ h1, h2 { font-family: "Manrope", sans-serif; color: var(--navy); letter-spacing:
   .product-content { padding: 13px 11px 12px; }
   .product-content h3 { font-size: 12px; }
   .product-content > p { min-height: 50px; font-size: 9px; }
-  .product-meta { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
-  .product-enquire.button { min-height: 40px; font-size: 9px; }
+  .product-meta { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .product-enquire.button { min-height: 44px; font-size: 15px; }
   .featured-section { padding-block: 75px; }
   .featured-intro { align-items: flex-start; flex-direction: column; }
   .featured-intro .button { min-height: 42px; }
@@ -854,7 +859,7 @@ h1, h2 { font-family: "Manrope", sans-serif; color: var(--navy); letter-spacing:
   .offer-price { font-size: 17px; }
   .original-price { font-size: 9px; }
   .discount-badge { min-height: 17px; padding-inline: 5px; font-size: 7px; }
-  .product-enquire.button { min-height: 40px; gap: 5px; padding-inline: 8px; font-size: 8px; }
+  .product-enquire.button { min-height: 44px; gap: 6px; padding-inline: 10px; font-size: 15px; }
   .product-featured { grid-template-columns: 39% 1fr; }
   .product-featured .product-art { min-height: 174px; }
   .product-featured .product-content { padding: 13px 11px; }
@@ -1028,11 +1033,133 @@ h1, h2 { font-family: "Manrope", sans-serif; color: var(--navy); letter-spacing:
   .product-art { height: 160px; }
   .product-meta { grid-template-columns: 1fr; }
   .product-card-actions { width: 100%; }
+  .product-card-actions { grid-template-columns: 1fr; }
   .product-enquire.button { width: 100%; }
   .modal-product-summary { grid-template-columns: 64px 1fr; }
   .modal-product-summary label { grid-column: 1 / -1; }
   .modal-product-summary img { width: 64px; height: 64px; }
   .footer-main { grid-template-columns: 1fr; }
+}
+
+/* Admin dashboard - isolated from the public storefront styling */
+.admin-shell {
+  min-height: 100vh;
+  background: #f3f6f5;
+  color: #233848;
+}
+.admin-card {
+  width: min(420px, calc(100% - 32px));
+  margin: 12vh auto 0;
+  padding: 32px;
+  border: 1px solid #dde7e4;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 18px 50px rgba(16,42,67,.10);
+}
+.admin-card h1 { margin: 8px 0 24px; color: #111827; font-size: 30px; }
+.admin-kicker { color: #00897B; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; }
+.admin-login { display: grid; gap: 14px; }
+.admin-login label,
+.admin-form label {
+  display: grid;
+  gap: 7px;
+  color: #34474f;
+  font-size: 13px;
+  font-weight: 700;
+}
+.admin-login input,
+.admin-form input,
+.admin-form select,
+.admin-form textarea {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #d5e2de;
+  border-radius: 4px;
+  padding: 10px 12px;
+  color: #111827;
+  background: white;
+  font: 15px "DM Sans", sans-serif;
+}
+.admin-form textarea { resize: vertical; }
+.admin-button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #00897B;
+  border-radius: 4px;
+  padding: 10px 16px;
+  color: white;
+  background: #00897B;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  text-decoration: none;
+}
+.admin-button.secondary {
+  color: #3f5a62;
+  border-color: #d5e2de;
+  background: white;
+}
+.admin-button:disabled { opacity: .65; cursor: wait; }
+.admin-back { margin-top: 4px; color: #52666d; font-size: 13px; text-align: center; }
+.admin-error { padding: 10px 12px; border: 1px solid #efb8b8; border-radius: 4px; color: #8c2c2c; background: #fff3f3; font-size: 13px; }
+.admin-not-configured { text-align: center; }
+.admin-dashboard { display: grid; grid-template-columns: 220px 1fr; }
+.admin-sidebar {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 18px;
+  color: #dce8e6;
+  background: #102a43;
+}
+.admin-brand { display: grid; gap: 2px; color: white; text-decoration: none; }
+.admin-brand strong { font: 800 18px "Manrope", sans-serif; letter-spacing: .14em; }
+.admin-brand span { font-size: 9px; letter-spacing: .28em; }
+.admin-sidebar nav { display: grid; margin-top: 36px; }
+.admin-sidebar nav span { padding: 12px; border-radius: 4px; color: #9ed5cc; background: #17394d; font-size: 14px; font-weight: 700; }
+.admin-signout { margin-top: auto; min-height: 42px; border: 1px solid #ffffff30; border-radius: 4px; color: white; background: transparent; cursor: pointer; }
+.admin-content { min-width: 0; padding: 34px; }
+.admin-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.admin-header span,
+.admin-form header span { color: #00897B; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.admin-header h1 { margin: 5px 0 0; color: #111827; font-size: 32px; }
+.admin-table-wrap { margin-top: 24px; overflow-x: auto; border: 1px solid #dde7e4; border-radius: 6px; background: white; }
+.admin-table { width: 100%; border-collapse: collapse; }
+.admin-table th, .admin-table td { padding: 14px; border-bottom: 1px solid #edf1ef; text-align: left; font-size: 13px; vertical-align: middle; }
+.admin-table th { color: #52666d; background: #f8faf9; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.admin-table td strong, .admin-table td span { display: block; }
+.admin-table td strong { color: #111827; font-size: 14px; }
+.admin-table td td + span,
+.admin-table td strong + span { max-width: 340px; margin-top: 4px; color: #68787e; }
+.admin-table td button { min-height: 36px; margin-right: 6px; border: 1px solid #d8e4e1; border-radius: 3px; padding: 7px 10px; color: #36525a; background: white; cursor: pointer; }
+.admin-table td button.danger { color: #9a3434; }
+.status-live, .status-draft { display: inline-flex !important; min-height: 24px; align-items: center; border-radius: 20px; padding: 4px 8px; font-size: 11px; font-weight: 800; }
+.status-live { color: #087263; background: #e3f3ef; }
+.status-draft { color: #7a6752; background: #f3eee7; }
+.admin-modal-backdrop { position: fixed; z-index: 200; inset: 0; display: grid; justify-items: end; background: rgba(7,23,35,.62); }
+.admin-form { width: min(620px, 94vw); height: 100%; overflow-y: auto; padding: 28px; background: white; box-shadow: -20px 0 60px rgba(8,31,43,.22); }
+.admin-form header { display: flex; justify-content: space-between; gap: 20px; }
+.admin-form header h2 { margin: 6px 0 0; color: #111827; }
+.admin-form header button { width: 44px; height: 44px; border: 1px solid #d8e4e1; border-radius: 50%; background: white; cursor: pointer; font-size: 22px; }
+.admin-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; }
+.admin-form-grid .full { grid-column: 1 / -1; }
+.admin-form-grid .check { grid-template-columns: 18px 1fr; align-items: center; }
+.admin-form-grid .check input { width: 18px; min-height: 18px; }
+.admin-form footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+
+@media (max-width: 760px) {
+  .admin-dashboard { grid-template-columns: 1fr; }
+  .admin-sidebar { min-height: auto; flex-direction: row; align-items: center; padding: 14px 16px; }
+  .admin-sidebar nav { margin: 0 0 0 auto; }
+  .admin-sidebar nav span { display: none; }
+  .admin-signout { margin: 0 0 0 12px; min-height: 38px; padding-inline: 10px; }
+  .admin-content { padding: 22px 16px; }
+  .admin-header h1 { font-size: 24px; }
+  .admin-form { width: 100%; padding: 20px; }
+  .admin-form-grid { grid-template-columns: 1fr; }
+  .admin-form-grid .full { grid-column: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

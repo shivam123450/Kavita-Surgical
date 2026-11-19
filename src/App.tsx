@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import { InstrumentArt } from "./InstrumentArt";
 import { business, directionsUrl, socialLinks } from "./business";
 import { createProductEnquiryMessage, formatPrice, getProductPricing } from "./productPricing";
-import { categories, products, type Product } from "./products";
+import { products as fallbackProducts, type Product } from "./products";
+import { fetchPublishedProducts, type AdminProduct } from "./catalogueStore";
+import { supabase } from "./supabase";
 
 const phoneNumber = business.phone;
 
@@ -197,7 +199,14 @@ function SectionHeading({
   );
 }
 
-function CategorySection({ onSelect }: { onSelect: (category: string) => void }) {
+function CategorySection({
+  onSelect,
+  catalogueProducts,
+}: {
+  onSelect: (category: string) => void;
+  catalogueProducts: Product[];
+}) {
+  const catalogueCategories = [...new Set(catalogueProducts.map((product) => product.category))];
   return (
     <section className="section categories-section" id="categories">
       <div className="wrap">
@@ -207,8 +216,8 @@ function CategorySection({ onSelect }: { onSelect: (category: string) => void })
           description="A clear starting point for exploring our surgical instrument catalogue."
         />
         <div className="category-grid">
-          {categories.map((category, index) => {
-            const representative = products.find((product) => product.category === category);
+          {catalogueCategories.map((category, index) => {
+            const representative = catalogueProducts.find((product) => product.category === category);
             return (
             <button className="category-card" key={category} onClick={() => onSelect(category)}>
               <span className="category-art">
@@ -360,6 +369,7 @@ function Catalogue({
   onImagePreview,
   textScale,
   onTextScaleChange,
+  catalogueProducts,
 }: {
   selectedCategory: string;
   onCategoryChange: (value: string) => void;
@@ -369,12 +379,13 @@ function Catalogue({
   onImagePreview: (product: Product) => void;
   textScale: number;
   onTextScaleChange: (scale: number) => void;
+  catalogueProducts: Product[];
 }) {
   const [query, setQuery] = useState("");
   const filterCategories = ["All Instruments", "Handles & Shafts", "Dissectors", "Scissors", "Graspers"];
   const filteredProducts = useMemo(() => {
     const searchTerm = query.trim().toLowerCase();
-    return products.filter((product) => {
+    return catalogueProducts.filter((product) => {
       const matchesCategory =
         selectedCategory === "All Instruments" ||
         selectedCategory === "All instruments" ||
@@ -385,7 +396,7 @@ function Catalogue({
         `${product.name} ${product.sku} ${product.category} ${product.description}`.toLowerCase().includes(searchTerm);
       return matchesCategory && matchesQuery;
     });
-  }, [query, selectedCategory]);
+  }, [query, selectedCategory, catalogueProducts]);
 
   return (
     <section className="section catalogue-section" id="products">
@@ -493,13 +504,15 @@ function FeaturedSection({
   onQuoteToggle,
   onEnquire,
   onImagePreview,
+  catalogueProducts,
 }: {
   quoteList: QuoteItem[];
   onQuoteToggle: (product: Product) => void;
   onEnquire: (product: Product) => void;
   onImagePreview: (product: Product) => void;
+  catalogueProducts: Product[];
 }) {
-  const featuredProducts = products.filter((product) => product.featured);
+  const featuredProducts = catalogueProducts.filter((product) => product.featured);
   return (
     <section className="featured-section section">
       <div className="wrap">
@@ -918,6 +931,34 @@ export default function App() {
   const [enquiryProduct, setEnquiryProduct] = useState<Product | null>(null);
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
   const [textScale, setTextScale] = useState(1);
+  const [catalogueProducts, setCatalogueProducts] = useState<Product[]>(fallbackProducts);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPublishedProducts = () =>
+      fetchPublishedProducts()
+      .then((managedProducts: AdminProduct[]) => {
+        if (!cancelled && managedProducts.length > 0) {
+          setCatalogueProducts(managedProducts);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogueProducts(fallbackProducts);
+      });
+    void loadPublishedProducts();
+    const channel = supabase
+      ?.channel("published-products")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "products" },
+        () => void loadPublishedProducts(),
+      )
+      .subscribe();
+    return () => {
+      cancelled = true;
+      if (channel) void supabase?.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.style.setProperty("--catalogue-font-scale", textScale.toString());
@@ -949,7 +990,10 @@ export default function App() {
       <Header />
       <main id="main-content">
         <Hero />
-        <CategorySection onSelect={selectCategory} />
+        <CategorySection
+          onSelect={selectCategory}
+          catalogueProducts={catalogueProducts}
+        />
         <Catalogue
           selectedCategory={selectedCategory}
           onCategoryChange={setSelectedCategory}
@@ -959,12 +1003,14 @@ export default function App() {
           onImagePreview={setPreviewProduct}
           textScale={textScale}
           onTextScaleChange={setTextScale}
+          catalogueProducts={catalogueProducts}
         />
         <FeaturedSection
           quoteList={quoteList}
           onQuoteToggle={toggleQuote}
           onEnquire={setEnquiryProduct}
           onImagePreview={setPreviewProduct}
+          catalogueProducts={catalogueProducts}
         />
         <AboutSection />
         <ContactSection />

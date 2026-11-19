@@ -74,3 +74,16 @@ Before public deployment:
 3. Add the canonical, Open Graph, Twitter image, sitemap, and robots domain URLs.
 4. Verify all product specifications and images.
 5. Configure HTTPS and security headers at the hosting provider.
+
+## Optional Supabase Admin Dashboard
+
+The dashboard is available at `/#admin`.
+
+1. Create a Supabase project in a development environment.
+2. Apply `supabase/migrations/202611200001_initial_admin.sql`.
+3. Copy `.env.example` to `.env.local` and add the Supabase project URL and anon key.
+4. Create an email/password administrator in Supabase Authentication.
+5. Insert that administrator's `auth.users.id` into `public.admin_users`.
+6. Never expose a Supabase service-role key in frontend or Git files.
+
+The public catalogue uses published Supabase products when configured and falls back to the static catalogue if Supabase is unavailable.
