@@ -543,8 +543,30 @@ h1, h2 { font-family: "Manrope", sans-serif; color: var(--navy); letter-spacing:
 .contact-address { display: flex; align-items: flex-start; gap: 9px; margin-top: 13px; color: #60787e; font-size: 10px; line-height: 1.65; }
 .contact-address svg { flex: 0 0 auto; margin-top: 1px; color: #398d82; }
 .contact-address:hover { color: #167c74; }
-.contact-actions { display: flex; gap: 9px; margin-top: 22px; }
-.contact-actions .button { min-height: 42px; padding-inline: 14px; font-size: 10px; }
+.contact-actions .button {
+    opacity: 1;
+    visibility: visible;
+    color: #123047;
+    background: #ffffff;
+    border: 1px solid #d5e1e7;
+}
+
+.contact-actions {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-top: 22px;
+}
+
+.contact-actions .button {
+    min-height: 54px;
+    width: 100%;
+    padding: 12px 16px;
+    font-size: 14px;
+    white-space: nowrap;
+    justify-content: center;
+    box-sizing: border-box;
+}
 
 .site-footer { color: #c1cfd1; background: #0b2538; }
 .footer-main { display: grid; grid-template-columns: 1.25fr .6fr 1.15fr .55fr; gap: 32px; padding-block: 49px 40px; }
