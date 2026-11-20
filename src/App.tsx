@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { InstrumentArt } from "./InstrumentArt";
-import { business, directionsUrl, socialLinks } from "./business";
+import { business, getDirectionsUrl, normalizeWhatsAppNumber, socialLinks } from "./business";
 import { createProductEnquiryMessage, formatPrice, getProductPricing } from "./productPricing";
-import { products as fallbackProducts, type Product } from "./products";
+import type { Product } from "./products";
+import { ManagedImage } from "./ManagedImage";
+import { createManagedImageUrl, SIGNED_IMAGE_URL_TTL_SECONDS } from "./imageStorage";
 import {
   fetchPublishedProducts,
   fetchPublishedCategories,
+  fetchPublishedFilterCategories,
+  fetchPublishedSiteImages,
   fetchHomepageSettings,
   fetchBusinessSettings,
   type AdminProduct,
   type AdminCategory,
+  type FilterCategory,
   type HomepageSettings,
+  type SiteImage,
 } from "./catalogueStore";
 import { supabase } from "./supabase";
-
-const phoneNumber = business.phone;
 
 interface QuoteItem {
   product: Product;
@@ -22,12 +25,19 @@ interface QuoteItem {
 }
 
 function whatsappLink(message: string) {
-  return `https://wa.me/${business.whatsappNumber}?text=${encodeURIComponent(message)}`;
+  const number = normalizeWhatsAppNumber(business.whatsappNumber);
+  return number
+    ? `https://wa.me/${number}?text=${encodeURIComponent(message)}`
+    : "#contact";
 }
 
-function imageSrcSet(image: string) {
-  const smallerImage = image.replace(".webp", "-480.webp");
-  return `${smallerImage} 480w, ${image} 720w`;
+function safeHttpsUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function uniqueCategoryNames(categories: string[]): string[] {
@@ -39,6 +49,15 @@ function uniqueCategoryNames(categories: string[]): string[] {
         .map((category) => [category.toLocaleLowerCase(), category]),
     ).values(),
   );
+}
+
+function getErrorMessage(caught: unknown): string {
+  if (caught instanceof Error) return caught.message;
+  if (caught && typeof caught === "object" && "message" in caught) {
+    const message = caught.message;
+    if (typeof message === "string" && message) return message;
+  }
+  return "Unknown Supabase error.";
 }
 
 function Icon({
@@ -78,7 +97,8 @@ function Icon({
 function EnquiryLink({ product, className = "" }: { product?: Product; className?: string }) {
   const message = product
     ? createProductEnquiryMessage(product)
-    : "Hello Kavita Surgical, I would like to know more about your surgical instruments.";
+    : `Hello ${business.name}, I would like to know more about your surgical instruments.`;
+  if (!normalizeWhatsAppNumber(business.whatsappNumber)) return null;
   return (
     <a
       className={className}
@@ -95,6 +115,7 @@ function EnquiryLink({ product, className = "" }: { product?: Product; className
 function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = () => setMenuOpen(false);
+  const phoneNumber = business.phone;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -113,11 +134,10 @@ function Header() {
       <aside className="announcement" aria-label="Business details">
         <div className="wrap announcement-inner">
           <span className="announcement-copy">
-            <strong>GSTIN</strong> {business.gstin}
-            <span className="announcement-divider">·</span>
+            {business.gstin && <><strong>GSTIN</strong> {business.gstin}<span className="announcement-divider">·</span></>}
             <span className="announcement-secondary">Surgical instruments &amp; medical equipment</span>
           </span>
-          <a href={`tel:${phoneNumber}`}><Icon name="phone" size={14} /> {business.phoneDisplay}</a>
+          {phoneNumber && <a href={`tel:${phoneNumber}`}><Icon name="phone" size={14} /> {business.phoneDisplay}</a>}
         </div>
       </aside>
       <header className="site-header">
@@ -174,16 +194,12 @@ function Hero({ homepage }: { homepage: HomepageSettings | null }) {
           <div className="hero-art-orbit orbit-one" />
           <div className="hero-art-orbit orbit-two" />
           <div className="hero-art-label label-top"><span className="label-dot" /> INSTRUMENT STUDY <small>01 / 03</small></div>
-          <img
+          <ManagedImage
             className="hero-product-image"
-            src={homepage?.heroImage || "/products/laparoscopic-instrument.webp"}
-            srcSet={
-              homepage?.heroImage
-                ? undefined
-                : imageSrcSet("/products/laparoscopic-instrument.webp")
-            }
+            storagePath={homepage?.heroImageStoragePath}
+            fallbackUrl={homepage?.heroImagePublished ? homepage.heroImageUrl : undefined}
             sizes="(max-width: 760px) calc(100vw - 40px), 52vw"
-            alt="Laparoscopic instrument with a long shaft and black handle."
+            alt={homepage?.heroImageAlt ?? ""}
             width="720"
             height="960"
             decoding="async"
@@ -224,14 +240,17 @@ function SectionHeading({
 
 function CategorySection({
   onSelect,
-  catalogueProducts,
   catalogueCategories,
 }: {
   onSelect: (category: string) => void;
-  catalogueProducts: Product[];
-  catalogueCategories: string[];
+  catalogueCategories: AdminCategory[];
 }) {
-  const uniqueCategories = uniqueCategoryNames(catalogueCategories);
+  const uniqueCategories = catalogueCategories.filter((category, index, categories) => {
+    const normalizedName = category.name.trim().toLocaleLowerCase();
+    return categories.findIndex((candidate) =>
+      candidate.name.trim().toLocaleLowerCase() === normalizedName,
+    ) === index;
+  });
   return (
     <section className="section categories-section" id="categories">
       <div className="wrap">
@@ -242,14 +261,13 @@ function CategorySection({
         />
         <div className="category-grid">
           {uniqueCategories.map((category, index) => {
-            const representative = catalogueProducts.find((product) => product.category === category);
             return (
-            <button className="category-card" key={category} onClick={() => onSelect(category)}>
+            <button className="category-card" key={category.id ?? category.name} onClick={() => onSelect(category.name)}>
               <span className="category-art">
-                {representative && (
-                  <img
-                    src={representative.image}
-                    srcSet={imageSrcSet(representative.image)}
+                {(category.imageStoragePath || category.image) && (
+                  <ManagedImage
+                    storagePath={category.imageStoragePath}
+                    fallbackUrl={category.imagePublished ? category.image : undefined}
                     sizes="(max-width: 760px) 45vw, 280px"
                     alt=""
                     aria-hidden="true"
@@ -261,7 +279,7 @@ function CategorySection({
                 )}
               </span>
               <span className="category-number">0{index + 1}</span>
-              <span className="category-name">{category}</span>
+              <span className="category-name">{category.name}</span>
               <span className="category-arrow"><Icon name="arrow" size={18} /></span>
             </button>
             );
@@ -322,11 +340,12 @@ function ProductCard({
         className="product-art"
         onClick={() => onImagePreview(product)}
         aria-label={`Zoom preview of ${product.name}`}
+        disabled={!product.imageStoragePath && !product.imageUrl}
       >
         <span className="product-category">{product.category}</span>
-        <img
-          src={product.image}
-          srcSet={imageSrcSet(product.image)}
+        <ManagedImage
+          storagePath={product.imageStoragePath}
+          fallbackUrl={product.imageUrl}
           sizes="(max-width: 420px) 46vw, (max-width: 760px) 48vw, (max-width: 1000px) 30vw, 280px"
           alt={product.imageAlt}
           width="720"
@@ -335,7 +354,7 @@ function ProductCard({
           decoding="async"
         />
         <span className="art-index">{product.sku}</span>
-        <span className="image-zoom-label">Zoom preview</span>
+        {(product.imageStoragePath || product.imageUrl) && <span className="image-zoom-label">Zoom preview</span>}
       </button>
       <div className="product-content">
         <div className="product-title-row">
@@ -359,7 +378,9 @@ function ProductCard({
             ) : (
               <span className="price-on-enquiry">Price on enquiry</span>
             )}
-            <span className="sample-pricing-label">Excl. GST | Bulk pricing available</span>
+            <span className="sample-pricing-label">
+              {product.gstRate === undefined ? "GST details on enquiry" : `GST ${product.gstRate}%`}
+            </span>
           </div>
           <div className="product-card-actions">
             <button
@@ -395,6 +416,9 @@ function Catalogue({
   textScale,
   onTextScaleChange,
   catalogueProducts,
+  filterCategories,
+  filterCategoriesLoading,
+  filterCategoriesError,
 }: {
   selectedCategory: string;
   onCategoryChange: (value: string) => void;
@@ -405,11 +429,20 @@ function Catalogue({
   textScale: number;
   onTextScaleChange: (scale: number) => void;
   catalogueProducts: Product[];
+  filterCategories: FilterCategory[];
+  filterCategoriesLoading: boolean;
+  filterCategoriesError: string;
 }) {
   const [query, setQuery] = useState("");
-  const filterCategoryNames = catalogueProducts.flatMap((product) => [product.filterCategory]);
-  const uniqueFilterCategoryNames = uniqueCategoryNames(filterCategoryNames);
-  const filterCategories = ["All Instruments", ...uniqueFilterCategoryNames];
+  const uniqueFilterCategories = filterCategories.filter((category, index, categories) => {
+    const normalizedName = category.name.trim().toLocaleLowerCase();
+    return categories.findIndex((candidate) =>
+      candidate.name.trim().toLocaleLowerCase() === normalizedName,
+    ) === index;
+  });
+  const selectedFilterCategoryId = selectedCategory.startsWith("filter-category:")
+    ? selectedCategory.slice("filter-category:".length)
+    : "";
   const filteredProducts = useMemo(() => {
     const searchTerm = query.trim().toLowerCase();
     return catalogueProducts.filter((product) => {
@@ -417,13 +450,13 @@ function Catalogue({
         selectedCategory === "All Instruments" ||
         selectedCategory === "All instruments" ||
         selectedCategory === product.category ||
-        selectedCategory === product.filterCategory;
+        (Boolean(selectedFilterCategoryId) && product.filterCategoryId === selectedFilterCategoryId);
       const matchesQuery =
         !searchTerm ||
         `${product.name} ${product.sku} ${product.category} ${product.description}`.toLowerCase().includes(searchTerm);
       return matchesCategory && matchesQuery;
     });
-  }, [query, selectedCategory, catalogueProducts]);
+  }, [query, selectedCategory, selectedFilterCategoryId, catalogueProducts]);
 
   return (
     <section className="section catalogue-section" id="products">
@@ -467,18 +500,38 @@ function Catalogue({
             </div>
           </div>
           <div className="filter-row" role="group" aria-label="Filter products by category">
-            {filterCategories.map((category) => (
+            <button
+              type="button"
+              className={`filter-chip ${selectedCategory === "All Instruments" ? "active" : ""}`}
+              aria-pressed={selectedCategory === "All Instruments"}
+              onClick={() => onCategoryChange("All Instruments")}
+            >
+              All Instruments
+            </button>
+            {uniqueFilterCategories.map((category) => {
+              const value = `filter-category:${category.id}`;
+              return (
               <button
                 type="button"
-                key={category}
-                className={`filter-chip ${selectedCategory === category ? "active" : ""}`}
-                aria-pressed={selectedCategory === category}
-                onClick={() => onCategoryChange(category)}
+                key={category.id}
+                className={`filter-chip ${selectedCategory === value ? "active" : ""}`}
+                aria-pressed={selectedCategory === value}
+                onClick={() => onCategoryChange(value)}
               >
-                {category}
+                {category.name}
               </button>
-            ))}
+              );
+            })}
           </div>
+          {filterCategoriesLoading && <p className="catalogue-filter-state" role="status">Loading filter categories…</p>}
+          {!filterCategoriesLoading && filterCategoriesError && (
+            <p className="catalogue-filter-state" role="alert">
+              Filter categories could not be loaded: {filterCategoriesError}
+            </p>
+          )}
+          {!filterCategoriesLoading && !filterCategoriesError && uniqueFilterCategories.length === 0 && (
+            <p className="catalogue-filter-state" role="status">No published filter categories are available yet. Showing all products.</p>
+          )}
           <div className="results-row">
             <span aria-live="polite" aria-atomic="true">{filteredProducts.length} {filteredProducts.length === 1 ? "instrument" : "instruments"}</span>
             {(selectedCategory !== "All Instruments" || query) && (
@@ -532,14 +585,26 @@ function FeaturedSection({
   onEnquire,
   onImagePreview,
   catalogueProducts,
+  loading,
+  error,
+  productLimit,
 }: {
   quoteList: QuoteItem[];
   onQuoteToggle: (product: Product) => void;
   onEnquire: (product: Product) => void;
   onImagePreview: (product: Product) => void;
   catalogueProducts: Product[];
+  loading: boolean;
+  error: string;
+  productLimit: number;
 }) {
-  const featuredProducts = catalogueProducts.filter((product) => product.featured);
+  const featuredProducts = catalogueProducts
+    .filter((product) => product.featured)
+    .sort((a, b) =>
+      (a.featuredOrder ?? 0) - (b.featuredOrder ?? 0) ||
+      a.name.localeCompare(b.name),
+    )
+    .slice(0, Math.max(0, productLimit));
   return (
     <section className="featured-section section">
       <div className="wrap">
@@ -552,6 +617,11 @@ function FeaturedSection({
           <a href="#products" className="button button-light">View all instruments <Icon name="arrow" /></a>
         </div>
         <div className="featured-grid">
+          {loading && <p className="featured-state" role="status">Loading featured instruments...</p>}
+          {!loading && error && <p className="featured-state" role="alert">Featured instruments could not be loaded: {error}</p>}
+          {!loading && !error && featuredProducts.length === 0 && (
+            <p className="featured-state">No featured instruments are currently available.</p>
+          )}
           {featuredProducts.map((product) => (
             <ProductCard
               key={product.id}
@@ -569,13 +639,22 @@ function FeaturedSection({
   );
 }
 
-function AboutSection() {
+function AboutSection({ image }: { image?: SiteImage }) {
   return (
     <section className="section about-section" id="about">
       <div className="wrap about-layout">
         <div className="about-visual">
           <span className="about-index">KAVITA SURGICAL <i>—</i> PRODUCT DISCOVERY</span>
-          <div className="about-visual-art"><InstrumentArt style="scissors" /></div>
+          <div className="about-visual-art">
+            <ManagedImage
+              storagePath={image?.storagePath}
+              alt={image?.altText ?? ""}
+              width="720"
+              height="960"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
           <div className="about-stamp"><span>KS</span><small>PRODUCT<br />DISCOVERY</small></div>
           <span className="about-visual-caption">Thoughtful browsing.<br /><strong>Direct answers.</strong></span>
         </div>
@@ -596,37 +675,41 @@ function AboutSection() {
   );
 }
 
-function ContactSection() {
+function ContactSection({ settingsError }: { settingsError: string }) {
+  const phoneNumber = business.phone;
+  const directionsUrl = getDirectionsUrl();
   return (
     <section className="contact-section" id="contact">
       <div className="wrap contact-inner">
         <div className="contact-copy">
           <p className="eyebrow eyebrow-light"><span className="eyebrow-line" /> Here when you need us</p>
           <h2>Let's find the right<br /><span>instrument together.</span></h2>
-          <p>Based in Malad East, Mumbai. Reach out to Kavita Surgical for product details, current pricing, or availability.</p>
+          <p>Reach out to {business.name} for product details, current pricing, or availability.</p>
+          {settingsError && <p className="admin-error" role="alert">Business contact details could not be refreshed.</p>}
         </div>
         <div className="contact-card">
           <div className="contact-card-top"><span className="contact-monogram">KS</span><span>CONTACT DETAILS</span></div>
           <h3>{business.name}</h3>
-          <p><span>GSTIN</span> {business.gstin}</p>
-          <a className="contact-phone" href={`tel:${phoneNumber}`}><Icon name="phone" size={19} /> {business.phoneDisplay}</a>
-          <a className="contact-address" href={directionsUrl} target="_blank" rel="noopener noreferrer">
+          {business.gstin && <p><span>GSTIN</span> {business.gstin}</p>}
+          {phoneNumber && <a className="contact-phone" href={`tel:${phoneNumber}`}><Icon name="phone" size={19} /> {business.phoneDisplay}</a>}
+          {business.address && <a className="contact-address" href={directionsUrl} target="_blank" rel="noopener noreferrer">
             <Icon name="map" size={18} />
             <span>{business.addressLines[0]}<br />{business.addressLines[1]}</span>
-          </a>
+          </a>}
           <div className="contact-actions">
             <EnquiryLink className="button button-light" />
-            <a className="button button-ghost-light" href={`tel:${phoneNumber}`}><Icon name="phone" size={17} /> Call us</a>
-            <a className="button button-ghost-light" href={directionsUrl} target="_blank" rel="noopener noreferrer"><Icon name="map" size={17} /> Directions</a>
+            {phoneNumber && <a className="button button-ghost-light" href={`tel:${phoneNumber}`}><Icon name="phone" size={17} /> Call us</a>}
+            {business.address && <a className="button button-ghost-light" href={directionsUrl} target="_blank" rel="noopener noreferrer"><Icon name="map" size={17} /> Directions</a>}
           </div>
         </div>
       </div>
-      <div className="contact-decoration" aria-hidden="true"><InstrumentArt style="forceps" /></div>
     </section>
   );
 }
 
 function Footer() {
+  const phoneNumber = business.phone;
+  const directionsUrl = getDirectionsUrl();
   const activeSocialLinks = socialLinks.filter(
     (social): social is typeof social & { href: string } => Boolean(social.href),
   );
@@ -648,12 +731,12 @@ function Footer() {
         </div>
         <div className="footer-contact">
           <span className="footer-label">Get in touch</span>
-          <a href={`tel:${phoneNumber}`}>{business.phoneDisplay}</a>
-          <a href={whatsappLink(`Hello ${business.name}, I would like to know more about your instruments.`)} target="_blank" rel="noopener noreferrer">Message us on WhatsApp</a>
-          <a className="footer-address" href={directionsUrl} target="_blank" rel="noopener noreferrer" aria-label="View Kavita Surgical address on Google Maps">
-            Jai Hind Chawl, Gandhi Nagar,<br />Kurar Village, Malad East,<br />Mumbai, Maharashtra 400097, India.
-          </a>
-          <span className="footer-gst">GSTIN {business.gstin}</span>
+          {phoneNumber && <a href={`tel:${phoneNumber}`}>{business.phoneDisplay}</a>}
+          {normalizeWhatsAppNumber(business.whatsappNumber) && <a href={whatsappLink(`Hello ${business.name}, I would like to know more about your instruments.`)} target="_blank" rel="noopener noreferrer">Message us on WhatsApp</a>}
+          {business.address && <a className="footer-address" href={directionsUrl} target="_blank" rel="noopener noreferrer" aria-label={`View ${business.name} address on Google Maps`}>
+            {business.addressLines[0]}<br />{business.addressLines[1]}
+          </a>}
+          {business.gstin && <span className="footer-gst">GSTIN {business.gstin}</span>}
         </div>
         <div className="footer-social">
           <span className="footer-label">Follow</span>
@@ -782,9 +865,9 @@ function ImageLightbox({
         <button type="button" className="modal-close" onClick={onClose} aria-label="Close image preview">
           <Icon name="close" size={21} />
         </button>
-        <img
-          src={product.image}
-          srcSet={imageSrcSet(product.image)}
+        <ManagedImage
+          storagePath={product.imageStoragePath}
+          fallbackUrl={product.imageUrl}
           sizes="90vw"
           alt={product.imageAlt}
           width="720"
@@ -817,16 +900,22 @@ function InquiryModal({
   const [phone, setPhone] = useState("");
   const modalRef = useRef<HTMLElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const quoteListRef = useRef(quoteList);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    quoteListRef.current = quoteList;
+    onCloseRef.current = onClose;
+  }, [quoteList, onClose]);
 
   useEffect(() => {
     if (!product) return;
     previousFocusRef.current = document.activeElement as HTMLElement | null;
-    const currentItem = quoteList.find((item) => item.product.id === product.id);
+    const currentItem = quoteListRef.current.find((item) => item.product.id === product.id);
     setQuantity(String(currentItem?.quantity ?? 1));
     document.body.style.overflow = "hidden";
     modalRef.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") onCloseRef.current();
     };
     const trapFocus = (event: KeyboardEvent) => {
       if (event.key !== "Tab" || !modalRef.current) return;
@@ -854,7 +943,7 @@ function InquiryModal({
       document.body.style.overflow = "";
       previousFocusRef.current?.focus();
     };
-  }, [product, onClose]);
+  }, [product]);
 
   if (!product) return null;
 
@@ -905,7 +994,14 @@ function InquiryModal({
           </button>
         </div>
         <div className="modal-product-summary">
-          <img src={product.image} alt="" aria-hidden="true" width="720" height="960" />
+          <ManagedImage
+            storagePath={product.imageStoragePath}
+            fallbackUrl={product.imageUrl}
+            alt=""
+            aria-hidden="true"
+            width="720"
+            height="960"
+          />
           <div>
             <strong>{product.sku}</strong>
             <span>{product.category}</span>
@@ -943,9 +1039,9 @@ function InquiryModal({
           </label>
         </div>
         <div className="modal-actions">
-          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="button modal-whatsapp">
-            Send via WhatsApp
-          </a>
+          {normalizeWhatsAppNumber(business.whatsappNumber)
+            ? <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="button modal-whatsapp">Send via WhatsApp</a>
+            : <p role="status">WhatsApp contact is not configured. Please contact the business directly.</p>}
         </div>
       </aside>
     </div>
@@ -958,22 +1054,77 @@ export default function App() {
   const [enquiryProduct, setEnquiryProduct] = useState<Product | null>(null);
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
   const [textScale, setTextScale] = useState(1);
-  const [catalogueProducts, setCatalogueProducts] = useState<Product[]>(fallbackProducts);
+  const [catalogueProducts, setCatalogueProducts] = useState<Product[]>([]);
+  const [catalogueProductsLoading, setCatalogueProductsLoading] = useState(true);
+  const [catalogueProductsError, setCatalogueProductsError] = useState("");
   const [databaseCategories, setDatabaseCategories] = useState<AdminCategory[] | null>(null);
+  const [filterCategories, setFilterCategories] = useState<FilterCategory[]>([]);
+  const [filterCategoriesLoading, setFilterCategoriesLoading] = useState(true);
+  const [filterCategoriesError, setFilterCategoriesError] = useState("");
+  const [siteImages, setSiteImages] = useState<SiteImage[]>([]);
   const [homepage, setHomepage] = useState<HomepageSettings | null>(null);
+  const [businessRevision, setBusinessRevision] = useState(0);
+  const [businessSettingsError, setBusinessSettingsError] = useState("");
+
+  useEffect(() => {
+    const schema = document.getElementById("business-schema");
+    if (!schema) return;
+    schema.textContent = JSON.stringify({
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "LocalBusiness",
+          "@id": "#business",
+          name: business.name,
+          telephone: business.phone || undefined,
+          taxID: business.gstin || undefined,
+          description: "Surgical instruments catalogue and direct product enquiries.",
+          address: business.address
+            ? {
+                "@type": "PostalAddress",
+                streetAddress: business.address,
+                addressCountry: "IN",
+              }
+            : undefined,
+        },
+        {
+          "@type": "WebSite",
+          "@id": "#website",
+          name: business.name,
+          inLanguage: "en-IN",
+          publisher: { "@id": "#business" },
+        },
+      ],
+    });
+  }, [businessRevision]);
 
   useEffect(() => {
     let cancelled = false;
-    const loadPublishedProducts = () =>
-      fetchPublishedProducts()
+    const loadPublishedProducts = () => {
+      if (!supabase) {
+        setCatalogueProducts([]);
+        setCatalogueProductsError("Supabase is not configured.");
+        setCatalogueProductsLoading(false);
+        return;
+      }
+      setCatalogueProductsLoading(true);
+      return fetchPublishedProducts()
       .then((managedProducts: AdminProduct[]) => {
-        if (!cancelled && managedProducts.length > 0) {
+        if (!cancelled) {
           setCatalogueProducts(managedProducts);
+          setCatalogueProductsError("");
         }
       })
-      .catch(() => {
-        if (!cancelled) setCatalogueProducts(fallbackProducts);
+      .catch((caught: unknown) => {
+        if (!cancelled) {
+          setCatalogueProducts([]);
+          setCatalogueProductsError(getErrorMessage(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogueProductsLoading(false);
       });
+    };
     const loadPublishedCategories = () =>
       fetchPublishedCategories()
         .then((rows) => {
@@ -982,8 +1133,37 @@ export default function App() {
         .catch(() => {
           if (!cancelled) setDatabaseCategories(null);
         });
+    const loadPublishedFilterCategories = () => {
+      setFilterCategoriesLoading(true);
+      return fetchPublishedFilterCategories()
+        .then((rows) => {
+          if (!cancelled) {
+            setFilterCategories(rows);
+            setFilterCategoriesError("");
+          }
+        })
+        .catch((caught: unknown) => {
+          if (!cancelled) {
+            setFilterCategories([]);
+            setFilterCategoriesError(getErrorMessage(caught));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setFilterCategoriesLoading(false);
+        });
+    };
+    const loadPublishedSiteImages = () =>
+      fetchPublishedSiteImages()
+        .then((rows) => {
+          if (!cancelled) setSiteImages(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setSiteImages([]);
+        });
     void loadPublishedProducts();
     void loadPublishedCategories();
+    void loadPublishedFilterCategories();
+    void loadPublishedSiteImages();
     const channel = supabase
       ?.channel("published-products")
       .on(
@@ -993,8 +1173,23 @@ export default function App() {
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "product_images" },
+        () => void loadPublishedProducts(),
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "categories" },
         () => void loadPublishedCategories(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "filter_categories" },
+        () => void loadPublishedFilterCategories(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "site_images" },
+        () => void loadPublishedSiteImages(),
       )
       .subscribe();
     return () => {
@@ -1002,6 +1197,55 @@ export default function App() {
       if (channel) void supabase?.removeChannel(channel);
     };
   }, []);
+
+  useEffect(() => {
+    const siteIcon = siteImages.find((image) => image.sectionKey === "site-icon");
+    let cancelled = false;
+    let refreshTimer: number | undefined;
+    if (!siteIcon) {
+      document.querySelector('link[rel="icon"]')?.remove();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const refreshIcon = async () => {
+      try {
+        const url = await createManagedImageUrl(siteIcon.storagePath);
+        if (cancelled) return;
+        let iconLink = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+        if (!iconLink) {
+          iconLink = document.createElement("link");
+          iconLink.rel = "icon";
+          document.head.append(iconLink);
+        }
+        iconLink.href = url;
+        refreshTimer = window.setTimeout(
+          refreshIcon,
+          (SIGNED_IMAGE_URL_TTL_SECONDS - 60) * 1000,
+        );
+      } catch {
+        if (!cancelled) document.querySelector('link[rel="icon"]')?.remove();
+      }
+    };
+    void refreshIcon();
+    return () => {
+      cancelled = true;
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+    };
+  }, [siteImages]);
+
+  useEffect(() => {
+    if (
+      !filterCategoriesLoading &&
+      selectedCategory.startsWith("filter-category:") &&
+      !filterCategories.some((category) =>
+        `filter-category:${category.id}` === selectedCategory,
+      )
+    ) {
+      setSelectedCategory("All Instruments");
+    }
+  }, [filterCategories, filterCategoriesLoading, selectedCategory]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1012,22 +1256,27 @@ export default function App() {
         if (homepageSettings) setHomepage(homepageSettings);
         if (businessSettings) {
           business.name = businessSettings.name || business.name;
-          business.gstin = businessSettings.gstin || business.gstin;
-          business.phone = businessSettings.phone || business.phone;
-          business.phoneDisplay = businessSettings.phone || business.phoneDisplay;
-          business.whatsappNumber = businessSettings.whatsapp || business.whatsappNumber;
-          business.address = businessSettings.address || business.address;
+          business.gstin = businessSettings.gstin;
+          business.phone = businessSettings.phone;
+          business.phoneDisplay = businessSettings.phone;
+          business.whatsappNumber = normalizeWhatsAppNumber(businessSettings.whatsapp);
+          business.address = businessSettings.address;
+          business.addressLines = business.address.split(/,\s*(?=[^,]+$)/);
           const socialByName = new Map([
             ["Instagram", businessSettings.instagram],
             ["Facebook", businessSettings.facebook],
             ["LinkedIn", businessSettings.linkedin],
           ]);
           socialLinks.forEach((social) => {
-            social.href = socialByName.get(social.name) || null;
+            social.href = safeHttpsUrl(socialByName.get(social.name) ?? "");
           });
+          setBusinessRevision((revision) => revision + 1);
         }
+        setBusinessSettingsError("");
       })
-      .catch(() => undefined);
+      .catch((caught: unknown) => {
+        if (!cancelled) setBusinessSettingsError(getErrorMessage(caught));
+      });
     void loadSettings();
     const settingsChannel = supabase
       ?.channel("public-settings")
@@ -1076,16 +1325,39 @@ export default function App() {
   const catalogueCategoryNames = uniqueCategoryNames(databaseCategories
     ? databaseCategories.map((category) => category.name)
     : catalogueProducts.map((product) => product.category));
+  const catalogueCategories = databaseCategories ?? catalogueCategoryNames.map((name, index) => ({
+    name,
+    slug: `catalogue-category-${index}`,
+    description: "",
+    image: "",
+    imageAlt: "",
+    imagePublished: false,
+    sortOrder: index,
+    published: true,
+  }));
+  const aboutImage = siteImages.find((image) => image.sectionKey === "about-visual");
+  const promotionalBanner = siteImages.find((image) => image.sectionKey === "promotional-banner");
 
   return (
     <>
       <Header />
       <main id="main-content">
         <Hero homepage={homepage} />
+        {promotionalBanner && (
+          <section className="site-promo-banner" aria-label="Promotional banner">
+            <div className="wrap">
+              <ManagedImage
+                storagePath={promotionalBanner.storagePath}
+                alt={promotionalBanner.altText}
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </section>
+        )}
         <CategorySection
           onSelect={selectCategory}
-          catalogueProducts={catalogueProducts}
-          catalogueCategories={catalogueCategoryNames}
+          catalogueCategories={catalogueCategories}
         />
         <Catalogue
           selectedCategory={selectedCategory}
@@ -1097,6 +1369,9 @@ export default function App() {
           textScale={textScale}
           onTextScaleChange={setTextScale}
           catalogueProducts={catalogueProducts}
+          filterCategories={filterCategories}
+          filterCategoriesLoading={filterCategoriesLoading}
+          filterCategoriesError={filterCategoriesError}
         />
         <FeaturedSection
           quoteList={quoteList}
@@ -1104,21 +1379,26 @@ export default function App() {
           onEnquire={setEnquiryProduct}
           onImagePreview={setPreviewProduct}
           catalogueProducts={catalogueProducts}
+          loading={catalogueProductsLoading}
+          error={catalogueProductsError}
+          productLimit={homepage?.featuredProductLimit ?? 3}
         />
-        <AboutSection />
-        <ContactSection />
+        <AboutSection image={aboutImage} />
+        <ContactSection settingsError={businessSettingsError} />
       </main>
       <Footer />
-      <a
-        className="floating-whatsapp"
-        href={whatsappLink("Hello Kavita Surgical, I would like to know more about your surgical instruments.")}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="Chat with Kavita Surgical on WhatsApp"
-      >
-        <Icon name="chat" size={22} />
-        <span>Chat with us</span>
-      </a>
+      {normalizeWhatsAppNumber(business.whatsappNumber) && (
+        <a
+          className="floating-whatsapp"
+          href={whatsappLink(`Hello ${business.name}, I would like to know more about your surgical instruments.`)}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Chat with ${business.name} on WhatsApp`}
+        >
+          <Icon name="chat" size={22} />
+          <span>Chat with us</span>
+        </a>
+      )}
       <ImageLightbox product={previewProduct} onClose={() => setPreviewProduct(null)} />
       <InquiryModal
         product={enquiryProduct}
