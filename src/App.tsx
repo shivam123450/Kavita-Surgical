@@ -3,7 +3,15 @@ import { InstrumentArt } from "./InstrumentArt";
 import { business, directionsUrl, socialLinks } from "./business";
 import { createProductEnquiryMessage, formatPrice, getProductPricing } from "./productPricing";
 import { products as fallbackProducts, type Product } from "./products";
-import { fetchPublishedProducts, type AdminProduct } from "./catalogueStore";
+import {
+  fetchPublishedProducts,
+  fetchPublishedCategories,
+  fetchHomepageSettings,
+  fetchBusinessSettings,
+  type AdminProduct,
+  type AdminCategory,
+  type HomepageSettings,
+} from "./catalogueStore";
 import { supabase } from "./supabase";
 
 const phoneNumber = business.phone;
@@ -20,6 +28,17 @@ function whatsappLink(message: string) {
 function imageSrcSet(image: string) {
   const smallerImage = image.replace(".webp", "-480.webp");
   return `${smallerImage} 480w, ${image} 720w`;
+}
+
+function uniqueCategoryNames(categories: string[]): string[] {
+  return Array.from(
+    new Map(
+      categories
+        .map((category) => category.trim())
+        .filter(Boolean)
+        .map((category) => [category.toLocaleLowerCase(), category]),
+    ).values(),
+  );
 }
 
 function Icon({
@@ -131,16 +150,16 @@ function Header() {
   );
 }
 
-function Hero() {
+function Hero({ homepage }: { homepage: HomepageSettings | null }) {
   return (
     <section className="hero" id="home">
       <div className="hero-grid-pattern" aria-hidden="true" />
       <div className="wrap hero-layout">
         <div className="hero-copy">
           <p className="eyebrow"><span className="eyebrow-line" /> A considered catalogue for professionals</p>
-          <h1>Precision instruments.<br /><span>Trusted quality.</span></h1>
+          <h1>{homepage?.heroTitle ? <>{homepage.heroTitle}</> : <>Precision instruments.<br /><span>Trusted quality.</span></>}</h1>
           <p className="hero-description">
-            Find surgical instruments in Mumbai, browse our catalogue, and contact Kavita Surgical directly for product details and pricing.
+            {homepage?.heroSubtitle || "Find surgical instruments in Mumbai, browse our catalogue, and contact Kavita Surgical directly for product details and pricing."}
           </p>
           <div className="hero-actions">
             <a className="button" href="#products">Explore products <Icon name="arrow" /></a>
@@ -157,8 +176,12 @@ function Hero() {
           <div className="hero-art-label label-top"><span className="label-dot" /> INSTRUMENT STUDY <small>01 / 03</small></div>
           <img
             className="hero-product-image"
-            src="/products/laparoscopic-instrument.webp"
-            srcSet={imageSrcSet("/products/laparoscopic-instrument.webp")}
+            src={homepage?.heroImage || "/products/laparoscopic-instrument.webp"}
+            srcSet={
+              homepage?.heroImage
+                ? undefined
+                : imageSrcSet("/products/laparoscopic-instrument.webp")
+            }
             sizes="(max-width: 760px) calc(100vw - 40px), 52vw"
             alt="Laparoscopic instrument with a long shaft and black handle."
             width="720"
@@ -202,11 +225,13 @@ function SectionHeading({
 function CategorySection({
   onSelect,
   catalogueProducts,
+  catalogueCategories,
 }: {
   onSelect: (category: string) => void;
   catalogueProducts: Product[];
+  catalogueCategories: string[];
 }) {
-  const catalogueCategories = [...new Set(catalogueProducts.map((product) => product.category))];
+  const uniqueCategories = uniqueCategoryNames(catalogueCategories);
   return (
     <section className="section categories-section" id="categories">
       <div className="wrap">
@@ -216,7 +241,7 @@ function CategorySection({
           description="A clear starting point for exploring our surgical instrument catalogue."
         />
         <div className="category-grid">
-          {catalogueCategories.map((category, index) => {
+          {uniqueCategories.map((category, index) => {
             const representative = catalogueProducts.find((product) => product.category === category);
             return (
             <button className="category-card" key={category} onClick={() => onSelect(category)}>
@@ -382,7 +407,9 @@ function Catalogue({
   catalogueProducts: Product[];
 }) {
   const [query, setQuery] = useState("");
-  const filterCategories = ["All Instruments", "Handles & Shafts", "Dissectors", "Scissors", "Graspers"];
+  const filterCategoryNames = catalogueProducts.flatMap((product) => [product.filterCategory]);
+  const uniqueFilterCategoryNames = uniqueCategoryNames(filterCategoryNames);
+  const filterCategories = ["All Instruments", ...uniqueFilterCategoryNames];
   const filteredProducts = useMemo(() => {
     const searchTerm = query.trim().toLowerCase();
     return catalogueProducts.filter((product) => {
@@ -932,6 +959,8 @@ export default function App() {
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
   const [textScale, setTextScale] = useState(1);
   const [catalogueProducts, setCatalogueProducts] = useState<Product[]>(fallbackProducts);
+  const [databaseCategories, setDatabaseCategories] = useState<AdminCategory[] | null>(null);
+  const [homepage, setHomepage] = useState<HomepageSettings | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -945,7 +974,16 @@ export default function App() {
       .catch(() => {
         if (!cancelled) setCatalogueProducts(fallbackProducts);
       });
+    const loadPublishedCategories = () =>
+      fetchPublishedCategories()
+        .then((rows) => {
+          if (!cancelled) setDatabaseCategories(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setDatabaseCategories(null);
+        });
     void loadPublishedProducts();
+    void loadPublishedCategories();
     const channel = supabase
       ?.channel("published-products")
       .on(
@@ -953,10 +991,60 @@ export default function App() {
         { event: "*", schema: "public", table: "products" },
         () => void loadPublishedProducts(),
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "categories" },
+        () => void loadPublishedCategories(),
+      )
       .subscribe();
     return () => {
       cancelled = true;
       if (channel) void supabase?.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSettings = () =>
+      Promise.all([fetchHomepageSettings(), fetchBusinessSettings()])
+      .then(([homepageSettings, businessSettings]) => {
+        if (cancelled) return;
+        if (homepageSettings) setHomepage(homepageSettings);
+        if (businessSettings) {
+          business.name = businessSettings.name || business.name;
+          business.gstin = businessSettings.gstin || business.gstin;
+          business.phone = businessSettings.phone || business.phone;
+          business.phoneDisplay = businessSettings.phone || business.phoneDisplay;
+          business.whatsappNumber = businessSettings.whatsapp || business.whatsappNumber;
+          business.address = businessSettings.address || business.address;
+          const socialByName = new Map([
+            ["Instagram", businessSettings.instagram],
+            ["Facebook", businessSettings.facebook],
+            ["LinkedIn", businessSettings.linkedin],
+          ]);
+          socialLinks.forEach((social) => {
+            social.href = socialByName.get(social.name) || null;
+          });
+        }
+      })
+      .catch(() => undefined);
+    void loadSettings();
+    const settingsChannel = supabase
+      ?.channel("public-settings")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "homepage_settings" },
+        () => void loadSettings(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "business_settings" },
+        () => void loadSettings(),
+      )
+      .subscribe();
+    return () => {
+      cancelled = true;
+      if (settingsChannel) void supabase?.removeChannel(settingsChannel);
     };
   }, []);
 
@@ -985,14 +1073,19 @@ export default function App() {
     document.getElementById("products")?.scrollIntoView({ behavior: "smooth" });
   };
 
+  const catalogueCategoryNames = uniqueCategoryNames(databaseCategories
+    ? databaseCategories.map((category) => category.name)
+    : catalogueProducts.map((product) => product.category));
+
   return (
     <>
       <Header />
       <main id="main-content">
-        <Hero />
+        <Hero homepage={homepage} />
         <CategorySection
           onSelect={selectCategory}
           catalogueProducts={catalogueProducts}
+          catalogueCategories={catalogueCategoryNames}
         />
         <Catalogue
           selectedCategory={selectedCategory}
