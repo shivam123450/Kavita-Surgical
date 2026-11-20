@@ -1,89 +1,69 @@
 # Kavita Surgical
 
-Kavita Surgical is a responsive, frontend-only surgical instrument catalogue for browsing instruments and contacting the business directly for product enquiries.
+Responsive React and TypeScript catalogue for surgical instruments, with a Supabase-backed Admin Portal for products, categories, pricing, images, homepage content, and business contact settings.
 
-## Project overview
+## Technology and architecture
 
-The website includes:
+- React 18, TypeScript, and Vite build a static single-page application.
+- Supabase Auth authenticates administrators; the browser uses only the Supabase project URL and publishable key.
+- Supabase Postgres and Row Level Security are the authorization boundary for admin data. There is no custom server/API layer.
+- Supabase Storage hosts managed images in the existing private `product-images` bucket. Public pages use short-lived signed URLs for published content.
+- Existing HTTPS and same-origin legacy image URLs remain a validated fallback; recognized URLs from this project's `product-images` bucket are re-signed through Storage.
+- Public products and categories are loaded from Supabase; the frontend has no static product catalogue fallback.
 
-- A premium surgical instrument catalogue
-- Product search and category filters
-- INR sample or confirmed pricing presentation
-- WhatsApp enquiry flows
-- Quantity and quote-list inquiry support
-- Product image preview
-- Responsive desktop, tablet, and mobile layouts
-- Business, GSTIN, phone, address, and Google Maps information
-- SEO metadata and structured business information
+## Requirements and local setup
 
-## Technology stack
-
-- React 18
-- TypeScript
-- Vite
-- CSS
-- Responsive WebP product images
-
-No backend, database, authentication, checkout system, or payment gateway is included.
-
-## Prerequisites
-
-- Node.js 18 or newer
-- npm
-
-## Installation
+- Node.js 22 LTS and npm
+- A Supabase project for catalogue and Admin Portal functionality
 
 ```powershell
-npm install
+npm ci
+Copy-Item .env.example .env.local
 ```
 
-## Local development
+Set these variables in `.env.local` for local work, or in the deployment provider's environment settings:
+
+| Variable | Purpose | Browser-visible |
+| --- | --- | --- |
+| `VITE_SUPABASE_URL` | Supabase project URL | Yes |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key (legacy anon key is accepted by the client) | Yes |
+
+Vite embeds every `VITE_*` value into browser assets. **Never place a service-role key, database password, JWT secret, or other private credential in a `VITE_*` variable.** Do not commit `.env.local` or any other environment file.
 
 ```powershell
 npm run dev
-```
-
-Open the local URL printed by Vite, normally `http://localhost:5173`.
-
-## Production build
-
-```powershell
+npm run lint
+npm run typecheck
+npm test --if-present
 npm run build
-```
-
-The optimized static output is written to `dist/`.
-
-To inspect the production build locally:
-
-```powershell
 npm run preview
 ```
 
-## Product and business data
+The production bundle is written to `dist/`.
 
-Product names, SKUs, categories, descriptions, images, and prices are maintained in `src/products.ts`.
+## Supabase setup
 
-Business contact details and social-link configuration are maintained in `src/business.ts`. Social profile URLs remain disabled until verified public URLs are provided.
+1. Apply every SQL migration in `supabase/migrations/` in filename order, including `202611200006_remove_legacy_category_read_policy.sql`. Do not skip migrations when upgrading an existing project.
+2. Configure the `product-images` bucket and policies from the migrations. The bucket is private; only authorized admins can write, while signed reads are restricted to published content.
+3. Configure Supabase Auth email/password sign-in, email verification, MFA and rate limits according to the deployment's risk profile.
+4. Create an administrator account, then have a trusted project owner add its Auth UUID to `public.admin_users` using the Supabase SQL Editor:
 
-## Deployment notes
+   ```sql
+   insert into public.admin_users (user_id)
+   values ('<AUTH_USER_ID>')
+   on conflict (user_id) do nothing;
+   ```
 
-Before public deployment:
+5. Never add a service-role key to the browser or repository. Admin data access is enforced by Postgres RLS and Storage policies, not by hiding the `/admin` route.
 
-1. Replace demonstration product prices with verified prices.
-2. Configure the verified production domain.
-3. Add the canonical, Open Graph, Twitter image, sitemap, and robots domain URLs.
-4. Verify all product specifications and images.
-5. Configure HTTPS and security headers at the hosting provider.
+Products, product galleries, featured status/order, optional GST rates, categories, filter categories, homepage content, section images, and business contact settings are managed in the Admin Portal. Existing published product/category policies and the admin allowlist must be verified in the target Supabase project after migrations are applied.
 
-## Optional Supabase Admin Dashboard
+## Deployment
 
-The dashboard is available at `/#admin`.
+1. Configure the two public Supabase variables in the host's environment settings and build with `npm ci` followed by `npm run build`.
+2. Deploy the contents of `dist/` to a static SPA host. Configure `/admin` to serve `index.html`; `public/_redirects` contains the Netlify-style rule.
+3. Configure HTTPS and security headers at the host. A Content Security Policy must allow the configured Supabase project and the Google Fonts origins used by the site.
+4. Replace domain-dependent metadata and `public/sitemap.xml` contents only after the verified production domain is known. The repository intentionally does not invent a canonical production URL.
+5. Apply migrations and configure authentication, storage, and admin membership in the production Supabase project before opening the site to customers.
 
-1. Create a Supabase project in a development environment.
-2. Apply `supabase/migrations/202611200001_initial_admin.sql`.
-3. Copy `.env.example` to `.env.local` and add the Supabase project URL and anon key.
-4. Create an email/password administrator in Supabase Authentication.
-5. Insert that administrator's `auth.users.id` into `public.admin_users`.
-6. Never expose a Supabase service-role key in frontend or Git files.
-
-The public catalogue uses published Supabase products when configured and falls back to the static catalogue if Supabase is unavailable.
+The CI workflow runs dependency installation, lint, type checking, any available tests, the production build, and `npm audit`; it requires no production secrets.

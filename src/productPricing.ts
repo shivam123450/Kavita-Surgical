@@ -59,7 +59,12 @@ export function createProductEnquiryMessage(product: Product): string {
     details.push(`Discount: ${pricing.discountPercentage}%`);
   }
 
-  details.push("", "Excl. GST | Bulk pricing available. Please confirm final pricing.");
+  details.push(
+    "",
+    product.gstRate === undefined
+      ? "GST details to be confirmed. Please confirm final pricing."
+      : `GST: ${product.gstRate}%. Please confirm final pricing.`,
+  );
 
   return [
     `Hello ${business.name},`,
