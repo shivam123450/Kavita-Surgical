@@ -1,0 +1,3 @@
+[build.environment]
+# Supabase publishable keys are intentionally included in the browser bundle.
+SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_PUBLISHABLE_KEY"
