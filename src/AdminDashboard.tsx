@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { supabase } from "./supabase";
-import { normalizeWhatsAppNumber } from "./business";
+import { business as defaultBusiness, normalizeWhatsAppNumber } from "./business";
 import { ManagedImage } from "./ManagedImage";
 import { deleteManagedImage, uploadManagedImage } from "./imageStorage";
 import { formatPrice, getProductPricing } from "./productPricing";
@@ -118,8 +118,8 @@ export default function AdminDashboard() {
     id: "business",
     name: "",
     gstin: "",
-    phone: "",
-    whatsapp: "",
+    phone: defaultBusiness.phone,
+    whatsapp: defaultBusiness.whatsappNumber,
     email: "",
     address: "",
     instagram: "",

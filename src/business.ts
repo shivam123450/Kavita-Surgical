@@ -3,12 +3,16 @@ export interface SocialLink {
   href: string | null;
 }
 
+export const BUSINESS_PHONE_NUMBER = "+917977039439";
+export const BUSINESS_PHONE_DISPLAY = "+91 7977039439";
+export const BUSINESS_WHATSAPP_NUMBER = "917977039493";
+
 export const business = {
   name: "Kavita Surgical",
   gstin: "27AFNPV6299Q1ZX",
-  phone: "+918425019124",
-  phoneDisplay: "+91 8425019124",
-  whatsappNumber: "918425019124",
+  phone: BUSINESS_PHONE_NUMBER,
+  phoneDisplay: BUSINESS_PHONE_DISPLAY,
+  whatsappNumber: BUSINESS_WHATSAPP_NUMBER,
   address:
     "Jai Hind Chawl, Gandhi Nagar, Kurar Village, Malad East, Mumbai, Maharashtra 400097, India.",
   addressLines: [
