@@ -7,7 +7,7 @@ export function getManagedImagePathFromUrl(value: string | undefined): string | 
   if (!supabase || !value) return undefined;
   try {
     const imageUrl = new URL(value);
-    const projectUrl = new URL(import.meta.env.VITE_SUPABASE_URL);
+    const projectUrl = new URL(import.meta.env.VITE_SUPABASE_URL.trim());
     if (imageUrl.origin !== projectUrl.origin) return undefined;
     const match = imageUrl.pathname.match(
       /\/storage\/v1\/object\/(?:public|sign|authenticated)\/product-images\/(.+)$/,

@@ -21,12 +21,14 @@ npm ci
 Copy-Item .env.example .env.local
 ```
 
-Set these variables in `.env.local` for local work, or in the deployment provider's environment settings:
+Set these variables in `.env.local` for local work, or in the deployment provider's **build** environment:
 
 | Variable | Purpose | Browser-visible |
 | --- | --- | --- |
 | `VITE_SUPABASE_URL` | Supabase project URL | Yes |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key (legacy anon key is accepted by the client) | Yes |
+
+Alternatively, set `VITE_SUPABASE_ANON_KEY` to the project's legacy public anon key. If both keys are non-empty, the publishable key takes precedence. Do not use a secret or service-role key.
 
 Vite embeds every `VITE_*` value into browser assets. **Never place a service-role key, database password, JWT secret, or other private credential in a `VITE_*` variable.** Do not commit `.env.local` or any other environment file.
 
@@ -60,10 +62,14 @@ Products, product galleries, featured status/order, optional GST rates, categori
 
 ## Deployment
 
-1. Configure the two public Supabase variables in the host's environment settings and build with `npm ci` followed by `npm run build`.
-2. Deploy the contents of `dist/` to a static SPA host. Configure `/admin` to serve `index.html`; `public/_redirects` contains the Netlify-style rule.
-3. Configure HTTPS and security headers at the host. A Content Security Policy must allow the configured Supabase project and the Google Fonts origins used by the site.
-4. Replace domain-dependent metadata and `public/sitemap.xml` contents only after the verified production domain is known. The repository intentionally does not invent a canonical production URL.
-5. Apply migrations and configure authentication, storage, and admin membership in the production Supabase project before opening the site to customers.
+The production site uses Cloudflare Workers Builds with the `kavita-surgical` Worker and the `main` branch.
+
+1. In Cloudflare, open **Workers & Pages > kavita-surgical > Settings > Build > Build variables and secrets**. Add `VITE_SUPABASE_URL` as `https://hdhlulgvqcifdqqlitop.supabase.co` and `VITE_SUPABASE_PUBLISHABLE_KEY` as the project's Supabase publishable key. The legacy public anon key can instead be supplied as `VITE_SUPABASE_ANON_KEY`. These values are public in the built JavaScript even if configured as a build secret.
+2. Set the build command to `npm run build:cloudflare` and the deploy command to `npx wrangler deploy`. The Cloudflare build command fails if the URL or both key options are missing or blank; it does not verify that a key is valid. Ordinary `npm run build` remains available for local work and CI.
+3. Keep the existing Worker static-assets and custom-domain configuration. Workers Builds must deploy `dist/` with SPA fallback so direct navigation to `/admin` serves `index.html`. The repository does not configure Worker routes or replace dashboard-managed bindings.
+4. Save the settings, push the changes to `main`, and trigger or retry a build. Runtime settings under **Settings > Variables & Secrets** are separate from build variables and do not supply Vite's `import.meta.env`. Changing a variable requires a new build and deploy; `wrangler deploy` alone only deploys the existing build.
+5. Verify the production `/admin` page displays the sign-in form and that an authorized administrator can sign in. Apply migrations and configure authentication, storage, and admin membership in the production Supabase project as described above.
+
+Configure HTTPS and security headers at the host. A Content Security Policy must allow the configured Supabase project and the Google Fonts origins used by the site.
 
 The CI workflow runs dependency installation, lint, type checking, any available tests, the production build, and `npm audit`; it requires no production secrets.
