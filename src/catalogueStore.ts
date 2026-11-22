@@ -1,6 +1,9 @@
 import { supabase } from "./supabase";
 import type { Product } from "./products";
-import type { ProductImage, ProductSpecification } from "./products";
+import type { ProductDocument, ProductImage, ProductSpecification } from "./products";
+import { deleteProductDocumentFile } from "./documentStorage";
+import { deleteDocumentSafely } from "./documentDeletion";
+import { filterPublishedProductChildren } from "./publishedProductChildren";
 
 export interface AdminProduct extends Product {
   databaseId?: string;
@@ -10,6 +13,7 @@ export interface AdminProduct extends Product {
   featuredOrder: number;
   images: ProductImage[];
   specifications: ProductSpecification[];
+  documents: ProductDocument[];
 }
 
 export interface AdminCategory {
@@ -132,6 +136,18 @@ export function mapDatabaseProduct(row: Record<string, unknown>): AdminProduct {
     sortOrder: Number(row.sort_order ?? 0),
     images,
     specifications,
+    documents: Array.isArray(row.product_documents)
+      ? row.product_documents.map((item) => {
+          const document = item as Record<string, unknown>;
+          return {
+            id: String(document.id),
+            title: String(document.title),
+            kind: document.kind === "license" ? "license" as const : "document" as const,
+            storagePath: String(document.storage_path),
+            published: Boolean(document.is_published),
+          };
+        })
+      : [],
   };
 }
 
@@ -139,18 +155,18 @@ export async function fetchPublishedProducts(): Promise<AdminProduct[]> {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from("products")
-    .select("*,categories(name),product_images(*),product_specifications(*)")
+    .select("*,categories(name),product_images(*),product_specifications(*),product_documents(*)")
     .eq("published", true)
     .order("sort_order", { ascending: true });
   if (error) throw error;
-  return (data ?? []).map(mapDatabaseProduct);
+  return (data ?? []).map((row) => mapDatabaseProduct(filterPublishedProductChildren(row)));
 }
 
 export async function fetchAdminProducts(): Promise<AdminProduct[]> {
   if (!supabase) throw new Error("Supabase is not configured.");
   const { data, error } = await supabase
     .from("products")
-    .select("*,categories(name),product_images(*),product_specifications(*)")
+    .select("*,categories(name),product_images(*),product_specifications(*),product_documents(*)")
     .order("sort_order", { ascending: true });
   if (error) throw error;
   return (data ?? []).map(mapDatabaseProduct);
@@ -202,6 +218,9 @@ export async function saveAdminProduct(product: AdminProduct): Promise<string> {
 export async function deleteAdminProduct(product: AdminProduct): Promise<void> {
   if (!supabase) throw new Error("Supabase is not configured.");
   if (!product.databaseId) return;
+  for (const document of product.documents) {
+    await deleteProductDocument(product.databaseId, document);
+  }
   const { error } = await supabase
     .from("products")
     .delete()
@@ -209,6 +228,40 @@ export async function deleteAdminProduct(product: AdminProduct): Promise<void> {
     .select("id")
     .single();
   if (error) throw error;
+}
+
+export async function saveProductDocument(productId: string, document: Omit<ProductDocument, "id">): Promise<ProductDocument> {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { data, error } = await supabase.from("product_documents").insert({
+    product_id: productId,
+    title: document.title,
+    kind: document.kind,
+    storage_path: document.storagePath,
+    is_published: document.published,
+  }).select("id").single();
+  if (error) throw error;
+  return { ...document, id: String(data.id) };
+}
+
+export async function setProductDocumentPublished(productId: string, documentId: string, published: boolean): Promise<void> {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { error } = await supabase.from("product_documents").update({ is_published: published })
+    .eq("product_id", productId).eq("id", documentId).select("id").single();
+  if (error) throw error;
+}
+
+export async function deleteProductDocument(productId: string, document: ProductDocument): Promise<void> {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const client = supabase;
+  await deleteDocumentSafely({
+    unpublish: () => setProductDocumentPublished(productId, document.id, false),
+    removeFile: () => deleteProductDocumentFile(document.storagePath),
+    removeRecord: async () => {
+      const { error } = await client.from("product_documents").delete()
+        .eq("product_id", productId).eq("id", document.id).select("id").single();
+      if (error) throw error;
+    },
+  });
 }
 
 async function saveProductSpecifications(

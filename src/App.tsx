@@ -4,6 +4,9 @@ import { createProductEnquiryMessage, formatPrice, getProductPricing } from "./p
 import type { Product } from "./products";
 import { ManagedImage } from "./ManagedImage";
 import { createManagedImageUrl, SIGNED_IMAGE_URL_TTL_SECONDS } from "./imageStorage";
+import { createProductDocumentUrl } from "./documentStorage";
+import { createQuoteMessage, type BuyerDetails } from "./quoteMessage";
+import "./storefront-flows.css";
 import {
   fetchPublishedProducts,
   fetchPublishedCategories,
@@ -20,8 +23,30 @@ import {
 import { supabase } from "./supabase";
 
 interface QuoteItem {
-  product: Product;
+  id: string;
   quantity: number;
+}
+
+const QUOTE_STORAGE_KEY = "kavita-quote-v1";
+
+function readQuote(): QuoteItem[] {
+  try {
+    const data: unknown = JSON.parse(localStorage.getItem(QUOTE_STORAGE_KEY) || "[]");
+    if (!Array.isArray(data)) return [];
+    const seen = new Set<string>();
+    return data.filter((item): item is QuoteItem => {
+      if (!item || typeof item.id !== "string" || !item.id || seen.has(item.id) ||
+        !Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > 9999) return false;
+      seen.add(item.id);
+      return true;
+    }).map(({ id, quantity }) => ({ id, quantity }));
+  } catch {
+    return [];
+  }
+}
+
+function productHref(product: Product) {
+  return `#product/${encodeURIComponent(product.id)}`;
 }
 
 function whatsappLink(message: string) {
@@ -162,6 +187,7 @@ function Header() {
             <a href="#categories" onClick={closeMenu}>Categories</a>
             <a href="#about" onClick={closeMenu}>About us</a>
             <a href="#contact" onClick={closeMenu}>Contact</a>
+            <a href="#quote" onClick={closeMenu}>Quote list</a>
             <EnquiryLink className="button button-small nav-cta" />
           </nav>
         </div>
@@ -358,7 +384,7 @@ function ProductCard({
       </button>
       <div className="product-content">
         <div className="product-title-row">
-          <h3>{product.name}</h3>
+          <h3><a href={productHref(product)}>{product.name}</a></h3>
           {featured && <span className="featured-mark"><Icon name="spark" size={14} /></span>}
         </div>
         <p>{product.description}</p>
@@ -383,6 +409,7 @@ function ProductCard({
             </span>
           </div>
           <div className="product-card-actions">
+            <a className="product-detail-link" href={productHref(product)}>View details</a>
             <button
               type="button"
               className="quote-toggle"
@@ -416,6 +443,8 @@ function Catalogue({
   textScale,
   onTextScaleChange,
   catalogueProducts,
+  loading,
+  error,
   filterCategories,
   filterCategoriesLoading,
   filterCategoriesError,
@@ -429,6 +458,8 @@ function Catalogue({
   textScale: number;
   onTextScaleChange: (scale: number) => void;
   catalogueProducts: Product[];
+  loading: boolean;
+  error: string;
   filterCategories: FilterCategory[];
   filterCategoriesLoading: boolean;
   filterCategoriesError: string;
@@ -540,19 +571,19 @@ function Catalogue({
               </button>
             )}
             {quoteList.length > 0 && (
-              <button className="quote-summary" type="button" onClick={() => onEnquire(quoteList[0].product)}>
+              <a className="quote-summary" href="#quote">
                 Quote list ({quoteList.length})
-              </button>
+              </a>
             )}
           </div>
         </div>
-        {filteredProducts.length ? (
+        {loading ? <p role="status">Loading products…</p> : error ? <p role="alert">Products could not be loaded: {error}</p> : filteredProducts.length ? (
           <div className="product-grid" id="product-results">
             {filteredProducts.map((product) => (
               <ProductCard
                 key={product.id}
                 product={product}
-                quoted={quoteList.some((item) => item.product.id === product.id)}
+                quoted={quoteList.some((item) => item.id === product.id)}
                 onQuoteToggle={onQuoteToggle}
                 onEnquire={onEnquire}
                 onImagePreview={onImagePreview}
@@ -627,7 +658,7 @@ function FeaturedSection({
               key={product.id}
               product={product}
               featured
-              quoted={quoteList.some((item) => item.product.id === product.id)}
+              quoted={quoteList.some((item) => item.id === product.id)}
               onQuoteToggle={onQuoteToggle}
               onEnquire={onEnquire}
               onImagePreview={onImagePreview}
@@ -883,175 +914,149 @@ function ImageLightbox({
   );
 }
 
-function InquiryModal({
-  product,
-  quoteList,
-  onClose,
-  onQuantityChange,
-}: {
-  product: Product | null;
-  quoteList: QuoteItem[];
-  onClose: () => void;
-  onQuantityChange: (product: Product, quantity: number) => void;
-}) {
-  const [quantity, setQuantity] = useState("1");
-  const [buyerName, setBuyerName] = useState("");
-  const [organisation, setOrganisation] = useState("");
-  const [phone, setPhone] = useState("");
-  const modalRef = useRef<HTMLElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  const quoteListRef = useRef(quoteList);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    quoteListRef.current = quoteList;
-    onCloseRef.current = onClose;
-  }, [quoteList, onClose]);
-
-  useEffect(() => {
-    if (!product) return;
-    previousFocusRef.current = document.activeElement as HTMLElement | null;
-    const currentItem = quoteListRef.current.find((item) => item.product.id === product.id);
-    setQuantity(String(currentItem?.quantity ?? 1));
-    document.body.style.overflow = "hidden";
-    modalRef.current?.focus();
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCloseRef.current();
-    };
-    const trapFocus = (event: KeyboardEvent) => {
-      if (event.key !== "Tab" || !modalRef.current) return;
-      const focusable = Array.from(
-        modalRef.current.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled])',
-        ),
-      ).filter((element) => !element.hasAttribute("hidden"));
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    window.addEventListener("keydown", trapFocus);
-    return () => {
-      window.removeEventListener("keydown", closeOnEscape);
-      window.removeEventListener("keydown", trapFocus);
-      document.body.style.overflow = "";
-      previousFocusRef.current?.focus();
-    };
-  }, [product]);
-
-  if (!product) return null;
-
-  const includedQuoteItems: QuoteItem[] =
-    quoteList.length > 0
-      ? quoteList
-      : [{ product, quantity: Math.max(1, Number(quantity) || 1) }];
-  const quotedDetails = includedQuoteItems
-    .map((item) =>
-      `${item.product.name} (${item.product.sku}) — Quantity: ${
-        item.product.id === product.id ? quantity : item.quantity
-      }`,
-    )
-    .join("\n");
-  const inquiryMessage = [
-    `Hello ${business.name},`,
-    "",
-    "I would like to enquire about the following instrument:",
-    "",
-    quotedDetails,
-    "",
-    buyerName ? `Contact name: ${buyerName}` : "",
-    organisation ? `Organisation: ${organisation}` : "",
-    phone ? `Phone: ${phone}` : "",
-    "",
-    "Please share availability and bulk pricing.",
-  ].filter(Boolean).join("\n");
-
-  const whatsappUrl = whatsappLink(inquiryMessage);
+function ProductDetail({ product, quoted, onAdd }: { product: Product; quoted: boolean; onAdd: (product: Product) => void }) {
+  const [selectedImage, setSelectedImage] = useState(0);
+  const [documentError, setDocumentError] = useState("");
+  const [openingDocument, setOpeningDocument] = useState("");
+  const images = (product.images ?? []).filter((image) => image.published !== false && (image.storagePath || image.url));
+  const gallery = images.length ? images : product.imageStoragePath || product.imageUrl
+    ? [{ storagePath: product.imageStoragePath, url: product.imageUrl, altText: product.imageAlt }]
+    : [];
+  const selected = gallery[selectedImage] ?? gallery[0];
+  const pricing = getProductPricing(product);
+  const documents = (product.documents ?? []).filter((document) => document.published && document.storagePath);
+  const openDocument = async (path: string) => {
+    setDocumentError("");
+    setOpeningDocument(path);
+    try {
+      const url = await createProductDocumentUrl(path);
+      window.location.assign(url);
+    } catch (caught) {
+      setDocumentError(`Unable to download this file: ${getErrorMessage(caught)}`);
+    } finally {
+      setOpeningDocument("");
+    }
+  };
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <aside
-        ref={modalRef}
-        className="inquiry-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="inquiry-modal-title"
-        tabIndex={-1}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="modal-header">
-          <div>
-            <span className="modal-eyebrow">Instrument enquiry</span>
-            <h2 id="inquiry-modal-title">{product.name}</h2>
+    <section className="flow-page wrap">
+      <a className="flow-back" href="#products">← Back to products</a>
+      <div className="detail-layout">
+        <div>
+          <div className="detail-image">
+            {selected ? <ManagedImage storagePath={selected.storagePath} fallbackUrl={selected.url} alt={selected.altText || product.name} /> : <p>No product image available.</p>}
           </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close enquiry form">
-            <Icon name="close" size={21} />
-          </button>
+          {gallery.length > 1 && <div className="detail-thumbnails" aria-label="Product images">
+            {gallery.map((image, index) => <button key={image.storagePath || image.url || index} type="button" aria-label={`View image ${index + 1}`} aria-pressed={selectedImage === index} onClick={() => setSelectedImage(index)}>
+              <ManagedImage storagePath={image.storagePath} fallbackUrl={image.url} alt="" />
+            </button>)}
+          </div>}
         </div>
-        <div className="modal-product-summary">
-          <ManagedImage
-            storagePath={product.imageStoragePath}
-            fallbackUrl={product.imageUrl}
-            alt=""
-            aria-hidden="true"
-            width="720"
-            height="960"
-          />
-          <div>
-            <strong>{product.sku}</strong>
-            <span>{product.category}</span>
+        <div className="detail-copy">
+          <p className="flow-kicker">{product.category}</p>
+          <h1>{product.name}</h1>
+          {product.sku && <p className="flow-sku">SKU: {product.sku}</p>}
+          {product.description && <p>{product.description}</p>}
+          <p className="detail-price">{pricing.sellingPrice === undefined ? "Price on enquiry" : formatPrice(pricing.sellingPrice)}</p>
+          <p className="flow-muted">{product.gstRate === undefined ? "GST details on enquiry" : `GST ${product.gstRate}% · final pricing to be confirmed`}</p>
+          <div className="flow-actions">
+            <button type="button" className="button" onClick={() => onAdd(product)}>{quoted ? "View quote list" : "Add to quote list"}</button>
+            <a href="#quote">View quote list →</a>
           </div>
-          <label>
-            Quantity
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={quantity}
-              onChange={(event) => {
-                const nextQuantity = Math.max(1, Number(event.target.value) || 1);
-                setQuantity(nextQuantity.toString());
-                onQuantityChange(product, nextQuantity);
-              }}
-            />
-          </label>
+          <p className="flow-muted">Send your enquiry on WhatsApp; availability and final pricing will be confirmed by the business.</p>
         </div>
-        {quoteList.length > 1 && (
-          <p className="quote-modal-note">{quoteList.length} instruments will be included in this inquiry.</p>
-        )}
-        <div className="inquiry-form">
-          <label>
-            Buyer name
-            <input value={buyerName} onChange={(event) => setBuyerName(event.target.value)} placeholder="Your name" />
-          </label>
-          <label>
-            Hospital / organisation
-            <input value={organisation} onChange={(event) => setOrganisation(event.target.value)} placeholder="Organisation name" />
-          </label>
-          <label>
-            Phone
-            <input type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+91" />
-          </label>
-        </div>
-        <div className="modal-actions">
-          {normalizeWhatsAppNumber(business.whatsappNumber)
-            ? <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="button modal-whatsapp">Send via WhatsApp</a>
-            : <p role="status">WhatsApp contact is not configured. Please contact the business directly.</p>}
-        </div>
-      </aside>
-    </div>
+      </div>
+      <div className="detail-information">
+        <section>
+          <h2>Specifications</h2>
+          {product.specifications?.length ? <dl>{product.specifications.map((spec, index) => <div key={spec.id || index}><dt>{spec.label}</dt><dd>{spec.value}</dd></div>)}</dl> : <p className="flow-muted">No specifications have been provided.</p>}
+        </section>
+        <section>
+          <h2>Documents &amp; licenses</h2>
+          {documents.length ? <ul className="document-list">{documents.map((document) => <li key={document.id}><span>{document.title} <small>{document.kind === "license" ? "License" : "Document"} · PDF</small></span><button type="button" disabled={Boolean(openingDocument)} onClick={() => void openDocument(document.storagePath)}>{openingDocument === document.storagePath ? "Preparing…" : "Download"}</button></li>)}</ul> : <p className="flow-muted">No documents are available for this product.</p>}
+          {documentError && <p role="alert">{documentError}</p>}
+        </section>
+      </div>
+    </section>
   );
+}
+
+function QuotePage({ items, products, loading, error, onQuantity, onRemove, storageError, settingsLoading, settingsError, buyer, setBuyer }: {
+  items: QuoteItem[]; products: Product[]; loading: boolean; error: string;
+  onQuantity: (id: string, quantity: number) => void; onRemove: (id: string) => void; storageError: string;
+  settingsLoading: boolean; settingsError: string;
+  buyer: BuyerDetails; setBuyer: React.Dispatch<React.SetStateAction<BuyerDetails>>;
+}) {
+  const { buyerName, organisation, phone, location, notes } = buyer;
+  const updateBuyer = (field: keyof BuyerDetails, value: string) => setBuyer((current) => ({ ...current, [field]: value }));
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
+  const resolved = items.map((item) => ({ ...item, product: products.find((product) => product.id === item.id) }));
+  const unavailable = !loading && !error && resolved.some((item) => !item.product);
+  const invalidQuantity = items.some((item) => {
+    const draft = quantityDrafts[item.id];
+    return draft !== undefined && (!/^\d+$/.test(draft) || Number(draft) < 1 || Number(draft) > 9999);
+  });
+  const message = createQuoteMessage(
+    business.name,
+    window.location.href,
+    resolved.map((item) => {
+      const price = item.product && getProductPricing(item.product).sellingPrice;
+      return {
+        id: item.id,
+        name: item.product?.name ?? "",
+        sku: item.product?.sku ?? "",
+        quantity: item.quantity,
+        price: price === undefined ? undefined : formatPrice(price),
+        gstRate: item.product?.gstRate,
+      };
+    }),
+    buyer,
+  );
+  return <section className="flow-page wrap">
+    <a className="flow-back" href="#products">← Continue browsing</a>
+    <div className="flow-heading"><p className="flow-kicker">Your enquiry</p><h1>Quote list</h1><p>Review your items before opening WhatsApp.</p></div>
+    {storageError && <p role="alert">{storageError}</p>}
+    {loading && <p role="status">Loading your quote items…</p>}
+    {error && <p role="alert">Products could not be loaded: {error}</p>}
+    {!loading && !error && items.length === 0 && <p>Your quote list is empty. <a href="#products">Browse products</a> to add instruments.</p>}
+    {!loading && !error && items.length > 0 && <div className="quote-layout">
+      <div className="quote-items">
+        {resolved.map((item) => <article className="quote-item" key={item.id}>
+          <div>{item.product ? <><h2><a href={productHref(item.product)}>{item.product.name}</a></h2><p>SKU: {item.product.sku || "Not provided"}</p></> : <><h2>Product unavailable</h2><p>ID: {item.id}</p><p>This product is no longer in the published catalogue. Remove it to continue.</p></>}</div>
+          <label>Quantity<input type="number" min="1" max="9999" step="1" value={quantityDrafts[item.id] ?? item.quantity} aria-invalid={quantityDrafts[item.id] !== undefined && (!/^\d+$/.test(quantityDrafts[item.id]) || Number(quantityDrafts[item.id]) < 1 || Number(quantityDrafts[item.id]) > 9999)} onChange={(event) => {
+            const draft = event.target.value;
+            setQuantityDrafts((current) => ({ ...current, [item.id]: draft }));
+            const value = Number(draft);
+            if (/^\d+$/.test(draft) && value >= 1 && value <= 9999) onQuantity(item.id, value);
+          }} /></label>
+          <button className="flow-remove" type="button" onClick={() => onRemove(item.id)} aria-label={`Remove ${item.product?.name || "unavailable product"}`}>Remove</button>
+        </article>)}
+        <p className="flow-muted">Prices, tax and availability are subject to confirmation. No payment is taken here.</p>
+      </div>
+      <div className="quote-form">
+        <h2>Contact details</h2><p>All fields are optional and will be included in your WhatsApp message.</p>
+        <label>Name<input autoComplete="name" value={buyerName} onChange={(event) => updateBuyer("buyerName", event.target.value)} /></label>
+        <label>Hospital / organisation<input autoComplete="organization" value={organisation} onChange={(event) => updateBuyer("organisation", event.target.value)} /></label>
+        <label>Phone<input type="tel" autoComplete="tel" value={phone} onChange={(event) => updateBuyer("phone", event.target.value)} /></label>
+        <label>City / location<input autoComplete="address-level2" value={location} onChange={(event) => updateBuyer("location", event.target.value)} /></label>
+        <label>Additional requirements<textarea rows={3} value={notes} onChange={(event) => updateBuyer("notes", event.target.value)} /></label>
+        {unavailable && <p role="alert">Remove unavailable products before continuing.</p>}
+        {invalidQuantity && <p role="alert">Enter a whole quantity from 1 to 9999 for each item.</p>}
+        {settingsLoading && <p role="status">Loading contact settings…</p>}
+        {!settingsLoading && settingsError && <p role="alert">Contact settings could not be loaded. Please try again later.</p>}
+        {!settingsLoading && !settingsError && !normalizeWhatsAppNumber(business.whatsappNumber) && <p role="alert">WhatsApp contact is not configured. Please contact the business directly.</p>}
+        {!unavailable && !invalidQuantity && !settingsLoading && !settingsError && normalizeWhatsAppNumber(business.whatsappNumber) && <a className="button" href={whatsappLink(message)} target="_blank" rel="noopener noreferrer">Continue to WhatsApp</a>}
+        <p className="flow-muted">WhatsApp opens with a draft message. Review and send it there.</p>
+      </div>
+    </div>}
+  </section>;
 }
 
 export default function App() {
   const [selectedCategory, setSelectedCategory] = useState("All Instruments");
-  const [quoteList, setQuoteList] = useState<QuoteItem[]>([]);
-  const [enquiryProduct, setEnquiryProduct] = useState<Product | null>(null);
+  const [quoteList, setQuoteList] = useState<QuoteItem[]>(readQuote);
+  const [buyer, setBuyer] = useState<BuyerDetails>({ buyerName: "", organisation: "", phone: "", location: "", notes: "" });
+  const [quoteStorageError, setQuoteStorageError] = useState("");
+  const [route, setRoute] = useState(window.location.hash);
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
   const [textScale, setTextScale] = useState(1);
   const [catalogueProducts, setCatalogueProducts] = useState<Product[]>([]);
@@ -1065,6 +1070,30 @@ export default function App() {
   const [homepage, setHomepage] = useState<HomepageSettings | null>(null);
   const [businessRevision, setBusinessRevision] = useState(0);
   const [businessSettingsError, setBusinessSettingsError] = useState("");
+  const [businessSettingsLoading, setBusinessSettingsLoading] = useState(true);
+
+  useEffect(() => {
+    const updateRoute = () => setRoute(window.location.hash);
+    window.addEventListener("hashchange", updateRoute);
+    return () => window.removeEventListener("hashchange", updateRoute);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(QUOTE_STORAGE_KEY, JSON.stringify(quoteList));
+      setQuoteStorageError("");
+    } catch {
+      setQuoteStorageError("Your quote list could not be saved on this device. It may be lost on reload.");
+    }
+  }, [quoteList]);
+
+  useEffect(() => {
+    if (route === "#quote" || route.startsWith("#product/")) {
+      window.scrollTo(0, 0);
+    } else if (route) {
+      document.getElementById(route.slice(1))?.scrollIntoView();
+    }
+  }, [route]);
 
   useEffect(() => {
     const schema = document.getElementById("business-schema");
@@ -1178,6 +1207,16 @@ export default function App() {
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "product_documents" },
+        () => void loadPublishedProducts(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "product_specifications" },
+        () => void loadPublishedProducts(),
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "categories" },
         () => void loadPublishedCategories(),
       )
@@ -1276,6 +1315,9 @@ export default function App() {
       })
       .catch((caught: unknown) => {
         if (!cancelled) setBusinessSettingsError(getErrorMessage(caught));
+      })
+      .finally(() => {
+        if (!cancelled) setBusinessSettingsLoading(false);
       });
     void loadSettings();
     const settingsChannel = supabase
@@ -1303,16 +1345,22 @@ export default function App() {
 
   const toggleQuote = (product: Product) => {
     setQuoteList((current) =>
-      current.some((item) => item.product.id === product.id)
-        ? current.filter((item) => item.product.id !== product.id)
-        : [...current, { product, quantity: 1 }],
+      current.some((item) => item.id === product.id)
+        ? current.filter((item) => item.id !== product.id)
+        : [...current, { id: product.id, quantity: 1 }],
     );
   };
 
-  const changeQuoteQuantity = (product: Product, quantity: number) => {
+  const addToQuote = (product: Product) => {
+    setQuoteList((current) => current.some((item) => item.id === product.id)
+      ? current : [...current, { id: product.id, quantity: 1 }]);
+    window.location.hash = "quote";
+  };
+
+  const changeQuoteQuantity = (id: string, quantity: number) => {
     setQuoteList((current) =>
       current.map((item) =>
-        item.product.id === product.id ? { ...item, quantity } : item,
+        item.id === id ? { ...item, quantity } : item,
       ),
     );
   };
@@ -1337,11 +1385,26 @@ export default function App() {
   }));
   const aboutImage = siteImages.find((image) => image.sectionKey === "about-visual");
   const promotionalBanner = siteImages.find((image) => image.sectionKey === "promotional-banner");
+  const isQuote = route === "#quote";
+  const isDetail = route.startsWith("#product/");
+  let detailId = "";
+  if (isDetail) {
+    try { detailId = decodeURIComponent(route.slice("#product/".length)); } catch { detailId = ""; }
+  }
+  const detailProduct = catalogueProducts.find((product) => product.id === detailId);
 
   return (
     <>
       <Header />
       <main id="main-content">
+        {isQuote ? <QuotePage items={quoteList} products={catalogueProducts} loading={catalogueProductsLoading} error={catalogueProductsError}
+          onQuantity={changeQuoteQuantity} onRemove={(id) => setQuoteList((current) => current.filter((item) => item.id !== id))}
+          storageError={quoteStorageError} settingsLoading={businessSettingsLoading} settingsError={businessSettingsError} buyer={buyer} setBuyer={setBuyer} />
+          : isDetail ? catalogueProductsLoading ? <section className="flow-page wrap"><p role="status">Loading product…</p></section>
+          : catalogueProductsError ? <section className="flow-page wrap"><a href="#products">← Back to products</a><p role="alert">Product could not be loaded: {catalogueProductsError}</p></section>
+          : detailProduct ? <ProductDetail key={detailProduct.id} product={detailProduct} quoted={quoteList.some((item) => item.id === detailProduct.id)} onAdd={addToQuote} />
+          : <section className="flow-page wrap"><a href="#products">← Back to products</a><h1>Product not found</h1><p>This product may no longer be available.</p></section>
+          : <>
         <Hero homepage={homepage} />
         {promotionalBanner && (
           <section className="site-promo-banner" aria-label="Promotional banner">
@@ -1364,11 +1427,13 @@ export default function App() {
           onCategoryChange={setSelectedCategory}
           quoteList={quoteList}
           onQuoteToggle={toggleQuote}
-          onEnquire={setEnquiryProduct}
+          onEnquire={addToQuote}
           onImagePreview={setPreviewProduct}
           textScale={textScale}
           onTextScaleChange={setTextScale}
           catalogueProducts={catalogueProducts}
+          loading={catalogueProductsLoading}
+          error={catalogueProductsError}
           filterCategories={filterCategories}
           filterCategoriesLoading={filterCategoriesLoading}
           filterCategoriesError={filterCategoriesError}
@@ -1376,7 +1441,7 @@ export default function App() {
         <FeaturedSection
           quoteList={quoteList}
           onQuoteToggle={toggleQuote}
-          onEnquire={setEnquiryProduct}
+          onEnquire={addToQuote}
           onImagePreview={setPreviewProduct}
           catalogueProducts={catalogueProducts}
           loading={catalogueProductsLoading}
@@ -1385,6 +1450,7 @@ export default function App() {
         />
         <AboutSection image={aboutImage} />
         <ContactSection settingsError={businessSettingsError} />
+        </>}
       </main>
       <Footer />
       {normalizeWhatsAppNumber(business.whatsappNumber) && (
@@ -1400,12 +1466,6 @@ export default function App() {
         </a>
       )}
       <ImageLightbox product={previewProduct} onClose={() => setPreviewProduct(null)} />
-      <InquiryModal
-        product={enquiryProduct}
-        quoteList={quoteList}
-        onClose={() => setEnquiryProduct(null)}
-        onQuantityChange={changeQuoteQuantity}
-      />
     </>
   );
 }

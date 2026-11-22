@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "lint": "eslint .",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "typecheck": "tsc -b --pretty false",
     "build": "npm run typecheck && vite build",
     "build:cloudflare": "npm run build -- --mode cloudflare",

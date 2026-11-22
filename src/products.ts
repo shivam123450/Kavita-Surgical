@@ -17,6 +17,15 @@ export interface Product {
   published?: boolean;
   images?: ProductImage[];
   specifications?: ProductSpecification[];
+  documents?: ProductDocument[];
+}
+
+export interface ProductDocument {
+  id: string;
+  title: string;
+  kind: "document" | "license";
+  storagePath: string;
+  published: boolean;
 }
 
 export interface ProductImage {

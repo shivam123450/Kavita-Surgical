@@ -1,0 +1,53 @@
+.flow-page { min-height: 55vh; min-height: 55svh; padding-block: 48px 80px; }
+.flow-back { display: inline-block; margin-bottom: 32px; color: #176f6a; font-weight: 700; }
+.flow-page a:not(.button):hover { text-decoration: underline; }
+.flow-page :focus-visible { outline: 3px solid #176f6a; outline-offset: 3px; }
+.detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 64px; align-items: start; }
+.detail-image { display: grid; place-items: center; min-height: 400px; background: #f3f6f5; }
+.detail-image img, .detail-image .managed-image-placeholder { width: 100%; height: 480px; object-fit: contain; }
+.detail-image p { margin: 0; color: #526771; }
+.detail-thumbnails { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.detail-thumbnails button { width: 72px; height: 72px; padding: 2px; border: 1px solid #cbd6da; background: white; cursor: pointer; }
+.detail-thumbnails button[aria-pressed="true"] { border: 2px solid #176f6a; }
+.detail-thumbnails img, .detail-thumbnails .managed-image-placeholder { width: 100%; height: 100%; object-fit: contain; }
+.detail-copy h1, .flow-heading h1 { margin-bottom: 12px; font-size: clamp(32px, 4vw, 48px); line-height: 1.15; overflow-wrap: anywhere; }
+.detail-copy > p:not(.flow-kicker) { line-height: 1.7; }
+.flow-kicker { color: #176f6a; font-size: 13px; font-weight: 700; }
+.flow-sku { color: #526771; font-size: 14px; }
+.detail-price { margin: 24px 0 0; color: var(--navy); font-size: 24px; font-weight: 700; }
+.flow-muted { color: #526771; font-size: 14px; line-height: 1.6; }
+.flow-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; margin: 24px 0; }
+.flow-actions > a { color: #176f6a; font-weight: 700; }
+.detail-information { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; margin-top: 64px; border-top: 1px solid var(--line); padding-top: 32px; }
+.detail-information h2, .quote-form h2 { font-size: 24px; letter-spacing: -.025em; }
+.detail-information dl { margin: 0; }
+.detail-information dl div { display: grid; grid-template-columns: 1fr 1.5fr; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.detail-information dt { color: #526771; }
+.detail-information dd { margin: 0; overflow-wrap: anywhere; }
+.document-list { list-style: none; padding: 0; margin: 0; }
+.document-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.document-list li > span { min-width: 0; overflow-wrap: anywhere; }
+.document-list small { display: block; color: #526771; margin-top: 4px; }
+.document-list button, .flow-remove { border: 0; background: transparent; color: #176f6a; font-weight: 700; cursor: pointer; padding: 8px; }
+.document-list button:disabled { opacity: .6; cursor: wait; }
+.flow-heading { margin-bottom: 32px; }
+.quote-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .7fr); gap: 48px; align-items: start; }
+.quote-item { display: grid; grid-template-columns: minmax(0, 1fr) 100px auto; gap: 16px; align-items: start; border-top: 1px solid var(--line); padding: 20px 0; }
+.quote-item h2 { margin: 0 0 8px; font-size: 18px; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.quote-item p { color: #526771; font-size: 14px; overflow-wrap: anywhere; }
+.quote-item label, .quote-form label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; }
+.quote-item input, .quote-form input, .quote-form textarea { width: 100%; min-height: 44px; padding: 10px; border: 1px solid #aebfc2; border-radius: 2px; background: white; color: var(--ink); font: inherit; font-size: 16px; }
+.quote-form { display: grid; gap: 16px; padding: 24px; background: #f3f6f5; }
+.quote-form h2, .quote-form p { margin: 0; }
+.quote-form p { line-height: 1.5; }
+.quote-form textarea { resize: vertical; }
+.product-detail-link { color: #176f6a; font-weight: 700; font-size: 12px; }
+@media (max-width: 760px) {
+  .flow-page { padding-block: 32px 64px; }
+  .detail-layout, .detail-information, .quote-layout { grid-template-columns: 1fr; gap: 32px; }
+  .detail-image { min-height: 280px; }
+  .detail-image img, .detail-image .managed-image-placeholder { height: 320px; }
+  .detail-information { margin-top: 40px; }
+  .quote-item { grid-template-columns: minmax(0, 1fr) 88px; }
+  .quote-item .flow-remove { grid-column: 1 / -1; justify-self: start; }
+}
