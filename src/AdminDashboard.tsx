@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import "./admin-documents.css";
 import { supabase } from "./supabase";
 import { normalizeWhatsAppNumber } from "./business";
 import { ManagedImage } from "./ManagedImage";
 import { deleteManagedImage, uploadManagedImage } from "./imageStorage";
+import { createProductDocumentUrl, deleteProductDocumentFile, uploadProductDocumentFile } from "./documentStorage";
+import { DocumentDeletionError } from "./documentDeletion";
+import { uploadProductImageBatch } from "./productImageBatch";
+import type { ProductDocument } from "./products";
 import { formatPrice, getProductPricing } from "./productPricing";
 import {
   deleteAdminProduct,
@@ -22,6 +27,9 @@ import {
   setPrimaryProductImage,
   setProductImagePublished,
   deleteProductImage,
+  saveProductDocument,
+  setProductDocumentPublished,
+  deleteProductDocument,
   fetchHomepageSettings,
   saveHomepageSettings,
   saveFeaturedProductLimit,
@@ -55,6 +63,7 @@ const emptyProduct = (): AdminProduct => ({
   sortOrder: 0,
   images: [],
   specifications: [],
+  documents: [],
 });
 
 function getErrorMessage(caught: unknown, fallback: string): string {
@@ -75,10 +84,17 @@ export default function AdminDashboard() {
   const [password, setPassword] = useState("");
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [draft, setDraft] = useState<AdminProduct | null>(null);
+  const [documentTitle, setDocumentTitle] = useState("");
+  const [documentKind, setDocumentKind] = useState<ProductDocument["kind"]>("document");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentFileKey, setDocumentFileKey] = useState(0);
+  const [documentLink, setDocumentLink] = useState<{ id: string; url: string } | null>(null);
   const [priceInputs, setPriceInputs] = useState<{ original: string; offer: string } | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const imageBatchActive = useRef(false);
   const [activeTab, setActiveTab] = useState("Overview");
   const [categories, setCategories] = useState<AdminCategory[]>([]);
   const [categoriesError, setCategoriesError] = useState("");
@@ -126,10 +142,15 @@ export default function AdminDashboard() {
     facebook: "",
     linkedin: "",
   });
-  const draftRef = useRef<AdminProduct | null>(null);
-
   const openProductDraft = (product: AdminProduct) => {
     setDraft(product);
+    setDocumentTitle("");
+    setDocumentKind("document");
+    setDocumentFile(null);
+    setDocumentFileKey((key) => key + 1);
+    setDocumentLink(null);
+    setError("");
+    setNotice("");
     setPriceInputs({
       original: product.originalPrice === undefined ? "" : String(product.originalPrice),
       offer: product.offerPrice === undefined ? "" : String(product.offerPrice),
@@ -137,8 +158,10 @@ export default function AdminDashboard() {
   };
 
   const closeProductDraft = () => {
+    if (busy || imageBatchActive.current) return;
     setDraft(null);
     setPriceInputs(null);
+    setDocumentLink(null);
   };
 
   const parsePrice = (value: string, label: string): number | undefined => {
@@ -152,10 +175,6 @@ export default function AdminDashboard() {
     }
     return parsed;
   };
-
-  useEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
 
   const loadProducts = useCallback(async () => {
     if (!supabase) return;
@@ -309,61 +328,137 @@ export default function AdminDashboard() {
     }
   };
 
-  const uploadImage = async (file: File) => {
-    const currentDraft = draftRef.current;
-    if (!supabase || !currentDraft) return;
+  const uploadImages = async (files: File[]) => {
+    if (!supabase || !draft?.databaseId || !files.length || busy || imageBatchActive.current) return;
+    const productId = draft.databaseId;
+    imageBatchActive.current = true;
+    setUploadingImages(true);
+    setError("");
+    setNotice("");
+    try {
+      const count = await uploadProductImageBatch(files, draft.images.length, draft.imageAlt || draft.name, {
+        upload: (file) => uploadManagedImage(file, "products"),
+        attach: (image) => saveProductImage(productId, image),
+        cleanup: deleteManagedImage,
+        onAttached: (image) => {
+          const appendImage = (product: AdminProduct): AdminProduct => ({
+            ...product,
+            imageStoragePath: image.isPrimary ? image.storagePath : product.imageStoragePath,
+            images: [...product.images, image],
+          });
+          setDraft((current) => current?.databaseId === productId ? appendImage(current) : current);
+          setProducts((current) => current.map((product) =>
+            product.databaseId === productId ? appendImage(product) : product));
+        },
+      });
+      setNotice(`${count} image(s) uploaded as unpublished.`);
+    } catch (caught) {
+      setError(getErrorMessage(caught, "Unable to upload images."));
+    } finally {
+      imageBatchActive.current = false;
+      setUploadingImages(false);
+    }
+  };
+
+  const updateDocuments = (productId: string, transform: (documents: ProductDocument[]) => ProductDocument[]) => {
+    setDraft((current) => current?.databaseId === productId
+      ? { ...current, documents: transform(current.documents) } : current);
+    setProducts((current) => current.map((product) => product.databaseId === productId
+      ? { ...product, documents: transform(product.documents) } : product));
+  };
+
+  const uploadDocument = async () => {
+    if (!draft?.databaseId || !documentFile) return;
+    const title = documentTitle.trim();
+    if (!title || title.length > 200) {
+      setError("Enter a document title of 1–200 characters.");
+      return;
+    }
+    const productId = draft.databaseId;
     setBusy(true);
     setError("");
+    setNotice("");
     let path: string | undefined;
     try {
-      path = await uploadManagedImage(file, "products");
-      let savedProductId = currentDraft.databaseId;
-      if (!savedProductId) {
-        savedProductId = await saveAdminProduct(currentDraft);
-        const createdDraft = { ...currentDraft, databaseId: savedProductId, id: savedProductId };
-        draftRef.current = createdDraft;
-        setDraft(createdDraft);
-        await loadProducts();
-      }
-      const imageId = await saveProductImage(savedProductId, {
-        storagePath: path,
-        altText: currentDraft.imageAlt || currentDraft.name,
-        sortOrder: currentDraft.images.length,
-        isPrimary: currentDraft.images.length === 0,
-        published: false,
+      path = await uploadProductDocumentFile(productId, documentFile);
+      const document = await saveProductDocument(productId, {
+        title, kind: documentKind, storagePath: path, published: false,
       });
-      const updatedDraft = {
-        ...currentDraft,
-        databaseId: savedProductId,
-        id: savedProductId,
-        imageStoragePath: currentDraft.images.length === 0 ? path : currentDraft.imageStoragePath,
-        images: [
-          ...currentDraft.images,
-          {
-            id: imageId,
-            storagePath: path,
-            altText: currentDraft.imageAlt || currentDraft.name,
-            sortOrder: currentDraft.images.length,
-            isPrimary: currentDraft.images.length === 0,
-            published: false,
-          },
-        ],
-      };
-      draftRef.current = updatedDraft;
-      setDraft(updatedDraft);
+      updateDocuments(productId, (documents) => [...documents, document]);
+      setDocumentTitle("");
+      setDocumentFile(null);
+      setDocumentFileKey((key) => key + 1);
+      setNotice("Document uploaded as unpublished. Publish it to make it available on a published product.");
     } catch (caught) {
+      let cleanupMessage = "";
       if (path) {
         try {
-          await deleteManagedImage(path);
+          await deleteProductDocumentFile(path);
         } catch (cleanupError) {
-          setError(
-            `Unable to attach image: ${getErrorMessage(caught, "Unknown Supabase error.")}. Cleanup also failed: ${getErrorMessage(cleanupError, "Unknown Supabase error.")}`,
-          );
-          setBusy(false);
-          return;
+          cleanupMessage = ` Cleanup failed for ${path}: ${getErrorMessage(cleanupError, "Unknown storage error.")}`;
         }
       }
-      setError(`Unable to attach image: ${getErrorMessage(caught, "Unknown Supabase error.")}`);
+      setError(`Unable to upload document: ${getErrorMessage(caught, "Unknown Supabase error.")}.${cleanupMessage}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleDocument = async (document: ProductDocument) => {
+    if (!draft?.databaseId) return;
+    const productId = draft.databaseId;
+    setBusy(true);
+    setError("");
+    try {
+      await setProductDocumentPublished(productId, document.id, !document.published);
+      updateDocuments(productId, (documents) => documents.map((item) =>
+        item.id === document.id ? { ...item, published: !item.published } : item));
+      setDocumentLink(null);
+    } catch (caught) {
+      setError(`Unable to update document: ${getErrorMessage(caught, "Unknown Supabase error.")}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeDocument = async (document: ProductDocument) => {
+    if (!draft?.databaseId || !window.confirm(`Delete ${document.title}?`)) return;
+    const productId = draft.databaseId;
+    setBusy(true);
+    setError("");
+    try {
+      await deleteProductDocument(productId, document);
+      updateDocuments(productId, (documents) => documents.filter((item) => item.id !== document.id));
+      setDocumentLink(null);
+    } catch (caught) {
+      let reconciliation = "";
+      if (caught instanceof DocumentDeletionError && caught.unpublished) {
+        setDocumentLink(null);
+        updateDocuments(productId, (documents) => documents.map((item) =>
+          item.id === document.id ? { ...item, published: false } : item));
+        try {
+          const products = await fetchAdminProducts();
+          const refreshed = products.find((product) => product.databaseId === productId);
+          if (refreshed) updateDocuments(productId, () => refreshed.documents);
+          else reconciliation = " Product no longer found; reload the product list.";
+        } catch {
+          reconciliation = " Could not refresh document state; reload before retrying.";
+        }
+      }
+      setError(`Unable to delete document: ${getErrorMessage(caught, "Unknown Supabase error.")}${reconciliation}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const prepareDocumentLink = async (document: ProductDocument) => {
+    setBusy(true);
+    setError("");
+    setDocumentLink(null);
+    try {
+      setDocumentLink({ id: document.id, url: await createProductDocumentUrl(document.storagePath) });
+    } catch (caught) {
+      setError(`Unable to create download link: ${getErrorMessage(caught, "Unknown Supabase error.")}`);
     } finally {
       setBusy(false);
     }
@@ -371,7 +466,7 @@ export default function AdminDashboard() {
 
   const saveProduct = async (event: FormEvent) => {
     event.preventDefault();
-    if (!draft) return;
+    if (!draft || imageBatchActive.current) return;
     setError("");
     setNotice("");
     if (!draft.filterCategoryId) {
@@ -396,7 +491,9 @@ export default function AdminDashboard() {
       if (!productToSave.databaseId) {
         setDraft({ ...productToSave, databaseId: savedId, id: savedId });
       }
-      closeProductDraft();
+      setDraft(null);
+      setPriceInputs(null);
+      setDocumentLink(null);
       await loadProducts();
       setNotice("Product saved successfully.");
     } catch (caught) {
@@ -416,6 +513,7 @@ export default function AdminDashboard() {
       await loadProducts();
       setNotice("Product deleted successfully.");
     } catch (caught) {
+      await loadProducts();
       setError(`Unable to delete product: ${getErrorMessage(caught, "Unknown Supabase error.")}`);
     } finally {
       setBusy(false);
@@ -1554,6 +1652,8 @@ export default function AdminDashboard() {
         <div className="admin-modal-backdrop" role="presentation" onMouseDown={closeProductDraft}>
           <form className="admin-form" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()} onSubmit={saveProduct}>
             <header><div><span>{draft.databaseId ? "Edit product" : "New product"}</span><h2>{draft.name || "Untitled instrument"}</h2></div><button type="button" onClick={closeProductDraft} aria-label="Close">×</button></header>
+            {error && <p className="admin-error" role="alert">{error}</p>}
+            {notice && <p className="admin-success" role="status">{notice}</p>}
             <div className="admin-form-grid">
               <label>Name<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
               <label>SKU<input required value={draft.sku} onChange={(event) => setDraft({ ...draft, sku: event.target.value })} /></label>
@@ -1674,12 +1774,13 @@ export default function AdminDashboard() {
                   </div>
                 ))}
               </div>
-              <label className="full">Image files<input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => {
+              <label className="full">Image files<input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={busy || uploadingImages || !draft.databaseId} onChange={(event) => {
                 const files = Array.from(event.target.files ?? []);
-                void (async () => {
-                  for (const file of files) await uploadImage(file);
-                })();
+                event.target.value = "";
+                if (files.length) void uploadImages(files);
               }} /></label>
+              {uploadingImages && <p className="full" role="status">Uploading images…</p>}
+              {!draft.databaseId && <p className="full">Save the product first, then reopen it to upload images and documents.</p>}
               {draft.images.length > 0 && (
                 <div className="admin-image-preview full">
                   {draft.images.map((image, index) => (
@@ -1690,7 +1791,7 @@ export default function AdminDashboard() {
                         alt={image.altText || draft.name}
                       />
                       {!image.isPrimary && image.id && draft.databaseId && (
-                        <button type="button" onClick={() => void makePrimaryProductImage(image)}>
+                        <button type="button" disabled={busy || uploadingImages} onClick={() => void makePrimaryProductImage(image)}>
                           Set as primary
                         </button>
                       )}
@@ -1698,12 +1799,13 @@ export default function AdminDashboard() {
                       <label className="check">
                         <input
                           type="checkbox"
+                          disabled={busy || uploadingImages}
                           checked={Boolean(image.published)}
                           onChange={() => void toggleProductImagePublished(draft, image)}
                         />
                         Published on website
                       </label>
-                      <button type="button" className="danger" onClick={() => void removeDraftImage(index)}>Remove</button>
+                      <button type="button" className="danger" disabled={busy || uploadingImages} onClick={() => void removeDraftImage(index)}>Remove</button>
                     </article>
                   ))}
                 </div>
@@ -1724,10 +1826,30 @@ export default function AdminDashboard() {
                   </div>
                 )}
               <label className="full">Image alt text<input value={draft.imageAlt} onChange={(event) => setDraft({ ...draft, imageAlt: event.target.value })} /></label>
+              <div className="admin-specifications full">
+                <strong>Documents and licenses</strong>
+                <p>Changes here are saved immediately. Only published PDFs on published products are available to visitors.</p>
+                {draft.documents.map((document) => (
+                  <div className="admin-document-row" key={document.id}>
+                    <span>{document.title} ({document.kind})</span>
+                    <label className="check"><input type="checkbox" disabled={busy || uploadingImages} checked={document.published} onChange={() => void toggleDocument(document)} /> Published</label>
+                    <button type="button" disabled={busy || uploadingImages} onClick={() => void prepareDocumentLink(document)}>Get download link</button>
+                    {documentLink?.id === document.id && <a href={documentLink.url} target="_blank" rel="noopener noreferrer">Download PDF (link expires in 10 minutes)</a>}
+                    <button type="button" className="danger" disabled={busy || uploadingImages} onClick={() => void removeDocument(document)}>Delete</button>
+                  </div>
+                ))}
+                {draft.documents.length === 0 && <p>No documents uploaded.</p>}
+                <label>Document title<input maxLength={200} disabled={busy || !draft.databaseId} value={documentTitle} onChange={(event) => setDocumentTitle(event.target.value)} /></label>
+                <label>Type<select disabled={busy || !draft.databaseId} value={documentKind} onChange={(event) => setDocumentKind(event.target.value as ProductDocument["kind"])}>
+                  <option value="document">Document</option><option value="license">License</option>
+                </select></label>
+                <label>PDF file (up to 10 MB)<input key={documentFileKey} type="file" accept="application/pdf,.pdf" disabled={busy || !draft.databaseId} onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} /></label>
+                <button type="button" disabled={busy || uploadingImages || !draft.databaseId || !documentFile} onClick={() => void uploadDocument()}>Upload PDF</button>
+              </div>
               <label className="check"><input type="checkbox" checked={draft.featured} onChange={(event) => setDraft({ ...draft, featured: event.target.checked })} />Featured</label>
               <label className="check"><input type="checkbox" checked={draft.published} onChange={(event) => setDraft({ ...draft, published: event.target.checked })} />Published</label>
             </div>
-            <footer><button type="button" className="admin-button secondary" onClick={closeProductDraft}>Cancel</button><button type="submit" className="admin-button" disabled={busy || !draft.categoryId || !draft.filterCategoryId}>{busy ? "Saving..." : "Save product"}</button></footer>
+            <footer><button type="button" className="admin-button secondary" disabled={busy || uploadingImages} onClick={closeProductDraft}>Cancel</button><button type="submit" className="admin-button" disabled={busy || uploadingImages || !draft.categoryId || !draft.filterCategoryId}>{busy ? "Saving..." : "Save product"}</button></footer>
           </form>
         </div>
       )}

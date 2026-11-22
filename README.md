@@ -8,6 +8,7 @@ Responsive React and TypeScript catalogue for surgical instruments, with a Supab
 - Supabase Auth authenticates administrators; the browser uses only the Supabase project URL and publishable key.
 - Supabase Postgres and Row Level Security are the authorization boundary for admin data. There is no custom server/API layer.
 - Supabase Storage hosts managed images in the existing private `product-images` bucket. Public pages use short-lived signed URLs for published content.
+- Product PDFs are stored in the private `product-documents` bucket. Only published documents on published products can be signed by public visitors.
 - Existing HTTPS and same-origin legacy image URLs remain a validated fallback; recognized URLs from this project's `product-images` bucket are re-signed through Storage.
 - Public products and categories are loaded from Supabase; the frontend has no static product catalogue fallback.
 
@@ -45,8 +46,8 @@ The production bundle is written to `dist/`.
 
 ## Supabase setup
 
-1. Apply every SQL migration in `supabase/migrations/` in filename order, including `202611200006_remove_legacy_category_read_policy.sql`. Do not skip migrations when upgrading an existing project.
-2. Configure the `product-images` bucket and policies from the migrations. The bucket is private; only authorized admins can write, while signed reads are restricted to published content.
+1. Apply every SQL migration in `supabase/migrations/` in filename order, including `202611200007_product_documents.sql`. Do not skip migrations when upgrading an existing project.
+2. Verify the private `product-images` and `product-documents` buckets and their policies from the migrations. Only authorized admins can write; signed reads are restricted to published content.
 3. Configure Supabase Auth email/password sign-in, email verification, MFA and rate limits according to the deployment's risk profile.
 4. Create an administrator account, then have a trusted project owner add its Auth UUID to `public.admin_users` using the Supabase SQL Editor:
 
@@ -60,6 +61,12 @@ The production bundle is written to `dist/`.
 
 Products, product galleries, featured status/order, optional GST rates, categories, filter categories, homepage content, section images, and business contact settings are managed in the Admin Portal. Existing published product/category policies and the admin allowlist must be verified in the target Supabase project after migrations are applied.
 
+Customers can open individual product details, add products and quantities to a quote list, and review their details before continuing to WhatsApp. The list is saved locally on their device. WhatsApp opens a draft: the customer must send it, and availability and final pricing remain subject to confirmation.
+
+Save a new product before reopening it to add images or documents. Images can be selected in batches; uploads run sequentially and stop on the first failure, preserving earlier successes. In the product editor, upload a PDF (up to 10 MB), give it a title and select document or license. Uploads and publication/deletion changes take effect immediately; new uploads are unpublished. Both the product and document must be published before visitors can obtain a signed download. Signed links expire after 10 minutes, but links already issued remain usable until expiry even if publication is revoked. Document deletion unpublishes the record before removing the file and record; a failed deletion may leave an unpublished record or orphaned file to reconcile. Storage and database operations are not atomic, and another administrator must not republish a document while it is being deleted. Deleting a product through the admin panel removes its document files first; deletion directly in the database cascades metadata only, so an operator must remove orphaned Storage objects separately.
+
+Storefront consumers receive `Product.documents` from `fetchPublishedProducts()`, with `id`, `title`, `kind`, `storagePath` and `published`. Use `createProductDocumentUrl(storagePath)` from `src/documentStorage.ts` on demand and handle errors; do not treat paths as public URLs or persist signed URLs.
+
 ## Deployment
 
 The production site uses Cloudflare Workers Builds with the `kavita-surgical` Worker and the `main` branch.
@@ -67,8 +74,9 @@ The production site uses Cloudflare Workers Builds with the `kavita-surgical` Wo
 1. In Cloudflare, open **Workers & Pages > kavita-surgical > Settings > Build > Build variables and secrets**. Add `VITE_SUPABASE_URL` as `https://hdhlulgvqcifdqqlitop.supabase.co` and `VITE_SUPABASE_PUBLISHABLE_KEY` as the project's Supabase publishable key. The legacy public anon key can instead be supplied as `VITE_SUPABASE_ANON_KEY`. These values are public in the built JavaScript even if configured as a build secret.
 2. Set the build command to `npm run build:cloudflare` and the deploy command to `npx wrangler deploy`. The Cloudflare build command fails if the URL or both key options are missing or blank; it does not verify that a key is valid. Ordinary `npm run build` remains available for local work and CI.
 3. Keep the existing Worker static-assets and custom-domain configuration. Workers Builds must deploy `dist/` with SPA fallback so direct navigation to `/admin` serves `index.html`. The repository does not configure Worker routes or replace dashboard-managed bindings.
-4. Save the settings, push the changes to `main`, and trigger or retry a build. Runtime settings under **Settings > Variables & Secrets** are separate from build variables and do not supply Vite's `import.meta.env`. Changing a variable requires a new build and deploy; `wrangler deploy` alone only deploys the existing build.
-5. Verify the production `/admin` page displays the sign-in form and that an authorized administrator can sign in. Apply migrations and configure authentication, storage, and admin membership in the production Supabase project as described above.
+4. Apply the Supabase migrations and configure authentication, storage, and admin membership as described above **before deploying**. The catalogue requires the `product_documents` table.
+5. Save the settings, push the changes to `main`, and trigger or retry a build. Runtime settings under **Settings > Variables & Secrets** are separate from build variables and do not supply Vite's `import.meta.env`. Changing a variable requires a new build and deploy; `wrangler deploy` alone only deploys the existing build.
+6. Verify the production `/admin` page displays the sign-in form and that an authorized administrator can sign in.
 
 Configure HTTPS and security headers at the host. A Content Security Policy must allow the configured Supabase project and the Google Fonts origins used by the site.
 
